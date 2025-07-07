@@ -1,0 +1,18 @@
+# Raspberry Pi 3 Hardware Build Profile
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = [
+    "-C", "target-cpu=cortex-a53",
+    "-C", "target-feature=-neon",
+    "-C", "link_arg=-Tsrc/arch/aarch64/start/start.ld",
+    "-C", "link_arg=--section-start=.text=0xffff000000080000",
+]
+runner = ".venv/bin/python support/post-build.py"
+
+[build]
+target = ["aarch64-unknown-none-softfloat"]
+
+[env]
+AR_aarch64_unknown_none_softfloat = "/opt/cross/gnu-aarch64-none-elf/bin/aarch64-none-elf-ar"
+CC_aarch64_unknown_none_softfloat = "/opt/cross/gnu-aarch64-none-elf/bin/aarch64-none-elf-gcc"
+CFLAGS_aarch64_unknown_none_softfloat = "-mcpu=cortex-a53 -march=armv8-a+nofp+nosimd -fPIC"
