@@ -1,4 +1,6 @@
-# Raspberry Pi 3 Hardware Build Configuration
+# QEMU Platform Build Configuration
+
+# Use the Raspberry Pi 3 profile for AArch64 builds.
 
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
