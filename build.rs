@@ -28,7 +28,9 @@ fn main() {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_aarch64(cfg: &mut cc::Build) {
-  cfg.include("src/arch/aarch64/start/include").files(&AARCH64_START_FILES);
+  cfg
+    .include("src/arch/aarch64/start/include")
+    .files(&AARCH64_START_FILES);
 
   for file in &AARCH64_START_FILES {
     println!("cargo:rerun-if-changed={}", file);

@@ -9,9 +9,9 @@
 use core::panic::PanicInfo;
 
 /// Panic handler.
-/// 
+///
 /// # Parameters
-/// 
+///
 /// * `info` - Information about the panic.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
@@ -19,14 +19,12 @@ fn panic(_info: &PanicInfo) -> ! {
 }
 
 /// Single-threaded kernel initialization.
-/// 
+///
 /// # Parameters
-/// 
+///
 /// * `config` - Pointer to the architecture configuration struct.
 #[unsafe(no_mangle)]
-extern "C" fn pk_init(config: usize) {
-  
-}
+extern "C" fn pk_init(_config: usize) {}
 
 /// Scheduler entry point.
 #[unsafe(no_mangle)]
