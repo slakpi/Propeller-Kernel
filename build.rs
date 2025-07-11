@@ -2,8 +2,10 @@ use cc;
 use std::env;
 
 /// Files included in the AArch64 start library.
-const AARCH64_START_FILES: [&'static str; 2] = [
+const AARCH64_START_FILES: [&'static str; 4] = [
   "src/arch/aarch64/start/cpu.s",
+  "src/arch/aarch64/start/dtb.s",
+  "src/arch/aarch64/start/mm.s",
   "src/arch/aarch64/start/start.s",
 ];
 

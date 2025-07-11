@@ -26,7 +26,6 @@
 // D17.2.118. Leave EL1 and EL0 in little endian and leave the MMU disabled.
 .equ SCTLR_EL1_C,          (1 << 2)
 .equ SCTLR_EL1_RESERVED,   ((3 << 28) | (3 << 22) | (1 << 20) | (1 << 11) | (3 << 7))
-.equ SCTLR_EL1_MMU_ENABLE, (1 << 0)
 .equ SCTLR_EL1_DEFAULT,    (SCTLR_EL1_RESERVED | SCTLR_EL1_C)
 
 .section ".text.boot"
@@ -50,7 +49,7 @@ _start:
 // TODO: This is a temporary delay loop to give OpenOCD time
 //       to connect.
 //----------------------------------------------------------
-  ldr     x0, =0x10000000
+  ldr     x0, =0x8000000
 1:
   sub     x0, x0, #1
   cbnz    x0, 1b
@@ -127,6 +126,43 @@ el1_entry:
 /// cores are parked. All single-threaded kernel initialization will be done
 /// here.
 primary_core_boot:
+// EL1 stack setup before turning on the MMU.
+  adrp    x0, __kernel_stack_start
+  mov     sp, x0
+  mov     fp, sp
+
+// Clear the BSS. The Rust core library provides a memset compiler intrinsic.
+  adrp    x0, __bss_start
+  mov     x1, #0
+  ldr     x2, =__bss_size
+  bl      memset
+
+// Check if the blob is a DTB. The kernel does not support ATAGs.
+  mov     x0, x19
+  bl      dtb_quick_check
+  cbz     x0, cpu_halt
+
+// Create the bootstrap kernel page tables.
+  mov     x1, x0            // DTB blob size to x1
+  mov     x0, x19           // DTB blob address to x0
+  bl      mmu_create_kernel_page_tables
+
+// Save off physical addresses needed for the kernel configuration struct.
+  adrp    x20, __kernel_start
+  adrp    x21, __kernel_pages_start
+  adrp    x22, __kernel_stack_list
+
+// Enable the MMU.
+//
+//   NOTE: Manually set the link register to the virtual return address when
+//         calling `mmu_setup_and_enable`. Do not use branch-and-link.
+  adrp    x0, __kernel_id_pages_start
+  adrp    x1, __kernel_pages_start
+  ldr     lr, =primary_core_begin_virt_addressing
+  b       mmu_setup_and_enable
+primary_core_begin_virt_addressing:
+  bl      mmu_cleanup
+
   b       cpu_halt
 
 
