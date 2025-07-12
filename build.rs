@@ -31,7 +31,7 @@ fn main() {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_aarch64(cfg: &mut cc::Build) {
-  if let Some(cpu_flag) = env::var("CPU_aarch64_unknown_none_softfloat").ok() {
+  if let Ok(cpu_flag) = env::var("CPU_aarch64_unknown_none_softfloat") {
     cfg.flag(cpu_flag);
   }
 
