@@ -9,4 +9,4 @@ rustflags = [
 ]
 
 [env]
-CFLAGS_aarch64_unknown_none_softfloat = "-mcpu=cortex-a53"
+CPU_aarch64_unknown_none_softfloat = "-mcpu=cortex-a53"
