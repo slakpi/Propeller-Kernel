@@ -42,6 +42,12 @@
 /// * x2 - Zero
 /// * x3 - Zero
 /// * x4 - Address of this entry point.
+///
+/// # Description
+///
+///   NOTE: The Linux AArch64 boot protocol requires the bootloader to leave the
+///         primary core in either EL2 or EL1. EL2 is preferred if the core
+///         supports virtualization.
 .global _start
 _start:
   mov     w19, w0           // Save the blob pointer.
@@ -55,25 +61,26 @@ _start:
   sub     x0, x0, #1
   cbnz    x0, 1b
 
-  bl      init_kernel_el    // Prepare to jump down to EL1.
-  eret                      // Jump down to the next EL.
+// Initialize the exception levels as needed to get to EL1.
+  mrs     x9, CurrentEL
+  lsr     x9, x9, #2        // Bits 3:2 are the exception level
+
+  cmp     x9, #3
+  beq     el3_entry         // Initialize EL3, EL2, and EL1
+  cmp     x9, #2
+  beq     el2_entry         // Initialize EL2 and EL1
+  cmp     x9, #1
+  beq     el1_entry         // Initialize EL1
+
+  b       cpu_halt          // Unknown state
 
 
 .section ".text"
 
 ///-----------------------------------------------------------------------------
 ///
-/// Initialize the kernel in the correct exception level.
-init_kernel_el:
-  mrs     x9, CurrentEL
-  lsr     x9, x9, #2
-
-  cmp     x9, #1
-  beq     1f                // Skip EL2 initialization if already in EL1
-  cmp     x9, #2
-  beq     2f                // Skip EL3 initialization if already in EL2
-
-3:
+/// Entry point for EL3.
+el3_entry:
   ldr     x9, =SCR_EL3_DEFAULT
   msr     scr_el3, x9
 
@@ -83,7 +90,13 @@ init_kernel_el:
   adr     x9, el2_entry
   msr     elr_el3, x9
 
-2:
+  eret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for EL2.
+el2_entry:
   ldr     x9, =HCR_EL2_DEFAULT
   msr     hcr_el2, x9
 
@@ -93,24 +106,16 @@ init_kernel_el:
   adr     x9, el1_entry
   msr     elr_el2, x9
 
-1:
-  ldr     x9, =SCTLR_EL1_DEFAULT
-  msr     sctlr_el1, x9
-
-  ret
-
-
-///-----------------------------------------------------------------------------
-///
-/// Dummy entry point for EL3 -> E2.
-el2_entry:
   eret
 
 
 ///-----------------------------------------------------------------------------
 ///
-/// Entry point for EL2 -> EL1.
+/// Entry point for EL1.
 el1_entry:
+  ldr     x9, =SCTLR_EL1_DEFAULT
+  msr     sctlr_el1, x9
+
   bl      cpu_get_id        // Get the core ID; core 0 is the primary core.
   cbz     x0, primary_core_boot
   b       secondary_core_boot
