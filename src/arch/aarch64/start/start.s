@@ -196,7 +196,7 @@ primary_core_begin_virt_addressing:
 //   +---------------------------------+ 8
 //   | Virtual base address            |
 //   +---------------------------------+ 0
-  mov     x29, sp
+  mov     fp, sp
   sub     sp, sp, #(8 * 10)
 
   ldr     x9, =__virtual_start
@@ -218,7 +218,11 @@ primary_core_begin_virt_addressing:
   mov     x0, sp
   bl      pk_init
 
-  b       cpu_halt
+// Clear the configuration struct and jump to the scheduler.
+  mov     sp, fp
+  b       pk_scheduler
+
+// We will never return from the scheduler.
 
 
 ///-----------------------------------------------------------------------------

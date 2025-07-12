@@ -9,8 +9,7 @@
 ///
 /// # Description
 ///
-/// The `.align` directive aligns the entries to offsets of 0x80. The GNU
-/// assembler interprets `.align` as a number of bits for ARM targets.
+/// The `.align` directive aligns the entries to offsets of 128 bytes.
 .macro ventry label
 .align 7
   b       \label
@@ -134,7 +133,7 @@
 ///
 /// # Description
 ///
-/// Aligned to 0x800 (0x80 * 16). See D1.3.1.
+/// Aligned to 2 KiB. See D1.3.1.
 .align 11
 .global el1_vectors
 el1_vectors:
@@ -177,7 +176,7 @@ _trap_exception_el0:
   mrs     x0, esr_el1
   mrs     x1, far_el1
   mov     x2, sp
-  bl      trap_exception    // Transfer to Rustland
+  bl      pk_handle_exception // Transfer to Rustland
   kernel_exit 0
 
 
@@ -189,5 +188,5 @@ _trap_exception_el1:
   mrs     x0, esr_el1
   mrs     x1, far_el1
   mov     x2, sp
-  bl      trap_exception    // Transfer to Rustland
+  bl      pk_handle_exception // Transfer to Rustland
   kernel_exit 1

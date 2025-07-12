@@ -17,7 +17,7 @@ use core::panic::PanicInfo;
 /// * `info` - Information about the panic.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-  loop {}
+  arch::cpu::halt();
 }
 
 /// Single-threaded kernel initialization.
@@ -33,5 +33,5 @@ extern "C" fn pk_init(config: usize) {
 /// Scheduler entry point.
 #[unsafe(no_mangle)]
 extern "C" fn pk_scheduler() -> ! {
-  loop {}
+  arch::cpu::halt();
 }

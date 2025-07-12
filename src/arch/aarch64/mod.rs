@@ -1,5 +1,6 @@
 //! AArch64 Architecture
 
+pub mod cpu;
 pub mod exceptions;
 
 /// Basic kernel configuration provided by the start code. All address are
