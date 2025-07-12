@@ -1,6 +1,7 @@
 # QEMU Platform Build Configuration
 
-# Use the Raspberry Pi 3 profile for AArch64 builds.
+# Use the Raspberry Pi 3 profile for AArch64 builds and the Raspberry Pi 2
+# profile for ARM builds.
 
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
@@ -8,5 +9,12 @@ rustflags = [
     "-C", "link_arg=--section-start=.text=0xffff000000080000",
 ]
 
+[target.armv7a-none-eabi]
+rustflags = [
+    "-C", "target-cpu=cortex-a7",
+    "-C", "link_arg=--section-start=.text=0xc0010000",
+]
+
 [env]
-CPU_aarch64_unknown_none_softfloat = "-mcpu=cortex-a53"
+CPU_aarch64 = "-mcpu=cortex-a53"
+CPU_arm = "-mcpu=cortex-a7"

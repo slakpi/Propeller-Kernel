@@ -10,6 +10,12 @@ const AARCH64_START_FILES: [&'static str; 5] = [
   "src/arch/aarch64/start/start.s",
 ];
 
+/// Files included in the ARM start library.
+const ARM_START_FILES: [&'static str; 2] = [
+  "src/arch/arm/start/cpu.s",
+  "src/arch/arm/start/start.s",
+];
+
 /// Build script entry.
 fn main() {
   let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
@@ -18,6 +24,8 @@ fn main() {
 
   if target_arch == "aarch64" {
     configure_for_aarch64(&mut cfg);
+  } else if target_arch == "arm" {
+    configure_for_arm(&mut cfg);
   } else {
     assert!(false, "Invalid target architecture.");
   }
@@ -31,7 +39,7 @@ fn main() {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_aarch64(cfg: &mut cc::Build) {
-  if let Ok(cpu_flag) = env::var("CPU_aarch64_unknown_none_softfloat") {
+  if let Ok(cpu_flag) = env::var("CPU_aarch64") {
     cfg.flag(cpu_flag);
   }
 
@@ -40,6 +48,25 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
     .files(&AARCH64_START_FILES);
 
   for file in &AARCH64_START_FILES {
+    println!("cargo:rerun-if-changed={}", file);
+  }
+}
+
+/// Configure start library build for ARM.
+///
+/// # Parameters
+///
+/// * `cfg` - The start library builder.
+fn configure_for_arm(cfg: &mut cc::Build) {
+  if let Ok(cpu_flag) = env::var("CPU_arm") {
+    cfg.flag(cpu_flag);
+  }
+
+  cfg
+      .include("src/arch/arm/start/include")
+      .files(&ARM_START_FILES);
+
+  for file in &ARM_START_FILES {
     println!("cargo:rerun-if-changed={}", file);
   }
 }

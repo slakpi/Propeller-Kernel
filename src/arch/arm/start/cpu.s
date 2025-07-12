@@ -1,4 +1,4 @@
-//! AArch64 Low-Level CPU Utilities
+//! ARM Low-Level CPU Utilities
 
 ///-----------------------------------------------------------------------------
 ///
@@ -10,7 +10,7 @@
 .global cpu_halt
 cpu_halt:
 1:
-  wfi                       // Use a wait to keep this from being a busy loop.
+  wfi                       // Wait for interrupt.
   b       1b                // Infinite loop.
 
 
@@ -19,6 +19,6 @@ cpu_halt:
 /// Get the current core ID.
 .global cpu_get_id
 cpu_get_id:
-  mrs     x0, mpidr_el1
-  and     x0, x0, #0xff
-  ret
+  mrc     p15, 0, r0, c0, c0, 5
+  and     r0, r0, #0xff
+  mov     pc, lr

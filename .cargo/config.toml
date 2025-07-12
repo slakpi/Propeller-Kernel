@@ -12,8 +12,14 @@ rustflags = [
 ]
 runner = ".venv/bin/python support/post-build.py"
 
+[target.armv7a-none-eabi]
+rustflags = [
+    "-C", "link_arg=-Tsrc/arch/arm/start/start.ld",
+]
+runner = ".venv/bin/python support/post-build.py"
+
 [build]
-target = ["aarch64-unknown-none-softfloat"]
+target = ["aarch64-unknown-none-softfloat", "armv7a-none-eabi"]
 
 [env]
 # CC_<arch> and AR_<arch> should be defined in the user's global cargo config.
@@ -21,3 +27,4 @@ target = ["aarch64-unknown-none-softfloat"]
 
 # The C flags assume the ARM GNU toolchain is used.
 CFLAGS_aarch64_unknown_none_softfloat = "-march=armv8-a+nofp+nosimd -fPIC"
+CFLAGS_armv7a_none_eabi = "-march=armv7-a -fPIC"
