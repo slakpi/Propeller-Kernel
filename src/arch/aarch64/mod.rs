@@ -1,7 +1,8 @@
 //! AArch64 Architecture
 
-pub mod cpu;
 pub mod exceptions;
+
+use crate::support::bits;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -49,6 +50,8 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 ///
 ///   NOTE: Assumes 4 KiB pages.
 ///
+///   NOTE: Assumes the kernel stack page count is a power of two.
+///
 ///   NOTE: Assumes the blob is a DTB.
 pub fn init(config: usize) {
   unsafe {
@@ -61,6 +64,7 @@ pub fn init(config: usize) {
   let kconfig = unsafe { &*(config as *const KernelConfig) };
 
   assert_eq!(kconfig.page_size, 4096);
+  assert!(bits::is_power_of_2(kconfig.kernel_stack_pages));
 
   unsafe {
     KERNEL_CONFIG = *kconfig;

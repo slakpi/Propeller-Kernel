@@ -111,8 +111,7 @@ el2_entry:
 ///
 /// Entry point for EL2 -> EL1.
 el1_entry:
-  mrs     x0, mpidr_el1     // Get the core ID; core 0 is the primary core.
-  and     x0, x0, #0xff
+  bl      cpu_get_id        // Get the core ID; core 0 is the primary core.
   cbz     x0, primary_core_boot
   b       secondary_core_boot
 

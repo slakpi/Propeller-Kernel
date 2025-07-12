@@ -1,6 +1,8 @@
-//! Low-Level CPU Utilities
+//! AArch64 Low-Level CPU Utilities
 
-/// Halt the current core.
+///-----------------------------------------------------------------------------
+///
+/// Halt the caller.
 ///
 /// # Description
 ///
@@ -11,3 +13,13 @@ cpu_halt:
 1:
   wfi                       // Use a wait to keep this from being a busy loop.
   b       1b                // Infinite loop.
+
+
+///-----------------------------------------------------------------------------
+///
+/// Get the current core ID.
+.global cpu_get_id
+cpu_get_id:
+  mrs     x0, mpidr_el1
+  and     x0, x0, #0xff
+  ret
