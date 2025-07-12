@@ -6,6 +6,8 @@
 // variable and code.
 #![cfg_attr(debug_assertions, allow(unused))]
 
+mod arch;
+
 use core::panic::PanicInfo;
 
 /// Panic handler.
@@ -24,7 +26,9 @@ fn panic(_info: &PanicInfo) -> ! {
 ///
 /// * `config` - Pointer to the architecture configuration struct.
 #[unsafe(no_mangle)]
-extern "C" fn pk_init(_config: usize) {}
+extern "C" fn pk_init(config: usize) {
+  arch::init(config);
+}
 
 /// Scheduler entry point.
 #[unsafe(no_mangle)]

@@ -12,10 +12,11 @@
 .equ HCR_EL2_RW,      (1 << 31)
 .equ HCR_EL2_DEFAULT, (HCR_EL2_RW)
 
-// Saved program status register defaults. These are only going to be used when
-// jumping from EL3 -> EL2 and EL2 -> EL1. We are going to make sure interrupts
-// remain masked. SP_EL2 will be used when jumping to EL1 and SP_EL1 will be
-// used when jumping to EL1. See C5.2.19 and C5.2.20.
+// Saved program status register defaults. SPSR_ELx is copied to PSTATE for the
+// lower exception level when returning from the exception. The SPSR_EL3 default
+// configures EL2 to use SP_EL2 after the exception return from EL3. Likewise,
+// the SPSR_EL2 default configures EL1 to use SP_EL1. SPSR_EL1 does not need to
+// be configured. See C5.2.19, C5.2.20, and D1.2.2.
 .equ SPSR_MASK_ALL_INTERRUPTS, (7 << 6)
 .equ SPSR_EL3_SP,              (9 << 0)
 .equ SPSR_EL2_SP,              (5 << 0)
@@ -150,7 +151,8 @@ primary_core_boot:
 // Save off physical addresses needed for the kernel configuration struct.
   adrp    x20, __kernel_start
   adrp    x21, __kernel_pages_start
-  adrp    x22, __kernel_stack_list
+  adrp    x22, __kernel_stack_start
+  adrp    x23, __kernel_stack_list
 
 // Enable the MMU.
 //
@@ -162,6 +164,59 @@ primary_core_boot:
   b       mmu_setup_and_enable
 primary_core_begin_virt_addressing:
   bl      mmu_cleanup
+
+// Setup the exception vectors.
+  adr     x9, el1_vectors
+  msr     vbar_el1, x9
+
+// ISR stack setup with virtual addressing enabled.
+  ldr     x9, =__kernel_stack_start
+  mov     sp, x9
+
+// Write kernel configuration struct. Provide all addresses as physical.
+//
+//   +---------------------------------+ 80
+//   | Physical primary stack address  |
+//   +---------------------------------+ 72
+//   | ISR stack page count            |
+//   +---------------------------------+ 64
+//   | ISR stack list address          |
+//   +---------------------------------+ 56
+//   | Page table area size            |
+//   +---------------------------------+ 48
+//   | Physical page tables address    |
+//   +---------------------------------+ 40
+//   | Kernel size                     |
+//   +---------------------------------+ 32
+//   | Physical kernel address         |
+//   +---------------------------------+ 24
+//   | Physical blob address           |
+//   +---------------------------------+ 16
+//   | Page size                       |
+//   +---------------------------------+ 8
+//   | Virtual base address            |
+//   +---------------------------------+ 0
+  mov     x29, sp
+  sub     sp, sp, #(8 * 10)
+
+  ldr     x9, =__virtual_start
+  ldr     x10, =__page_size
+  stp     x9, x10, [sp, #16 * 0]
+
+  stp     x19, x20, [sp, #16 * 1]
+
+  ldr     x9, =__kernel_size
+  stp     x9, x21, [sp, #16 * 2]
+
+  ldr     x9, =__kernel_pages_size
+  stp     x9, x23, [sp, #16 * 3]
+
+  ldr     x9, =__kernel_stack_pages
+  stp     x9, x23, [sp, #16 * 4]
+
+// Perform single-threaded kernel initialization.
+  mov     x0, sp
+  bl      pk_init
 
   b       cpu_halt
 
