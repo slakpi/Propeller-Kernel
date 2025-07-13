@@ -5,6 +5,7 @@
 
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
+    "-C", "target-feature=-neon",
     "-C", "target-cpu=cortex-a53",
     "-C", "link_arg=--section-start=.text=0xffff000000080000",
 ]
@@ -15,6 +16,9 @@ rustflags = [
     "-C", "link_arg=--section-start=.text=0xc0010000",
 ]
 
+[build]
+target = ["aarch64-unknown-none-softfloat", "armv7a-none-eabi"]
+
 [env]
-CPU_aarch64 = "-mcpu=cortex-a53"
-CPU_arm = "-mcpu=cortex-a7"
+CFLAGS_aarch64_unknown_none_softfloat = "-mcpu=cortex-a53 -march=armv8-a+nofp+nosimd -fPIC"
+CFLAGS_armv7a_none_eabi = "-mcpu=cortex-a7 -march=armv7ve -fPIC"

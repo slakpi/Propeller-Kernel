@@ -2,12 +2,8 @@
 
 # This configuration cannot be used on its own.
 
-# SIMD and floating-point are disabled. This saves time and space on context
-# switches with kernel threads as these registers do not need to be saved.
-
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
-    "-C", "target-feature=-neon",
     "-C", "link_arg=-Tsrc/arch/aarch64/start/start.ld",
 ]
 runner = ".venv/bin/python support/post-build.py"
@@ -19,12 +15,9 @@ rustflags = [
 runner = ".venv/bin/python support/post-build.py"
 
 [build]
-target = ["aarch64-unknown-none-softfloat", "armv7a-none-eabi"]
+target = []
 
 [env]
 # CC_<arch> and AR_<arch> should be defined in the user's global cargo config.
 # See https://doc.rust-lang.org/cargo/reference/config.html.
-
-# The C flags assume the ARM GNU toolchain is used.
-CFLAGS_aarch64_unknown_none_softfloat = "-march=armv8-a+nofp+nosimd -fPIC"
-CFLAGS_armv7a_none_eabi = "-march=armv7-a -fPIC"
+#   NOTE: The configuration files assume the ARM GNU toolchain is used.

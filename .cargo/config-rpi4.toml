@@ -1,0 +1,14 @@
+# Raspberry Pi 4 Hardware Build Configuration
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = [
+    "-C", "target-feature=-neon",
+    "-C", "target-cpu=cortex-a72",
+    "-C", "link_arg=--section-start=.text=0xffff000000080000",
+]
+
+[build]
+target = ["aarch64-unknown-none-softfloat"]
+
+[env]
+CFLAGS_aarch64_unknown_none_softfloat = "-mcpu=cortex-a72 -march=armv8-a+nofp+nosimd -fPIC"

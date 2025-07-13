@@ -11,8 +11,10 @@ const AARCH64_START_FILES: [&'static str; 5] = [
 ];
 
 /// Files included in the ARM start library.
-const ARM_START_FILES: [&'static str; 2] = [
+const ARM_START_FILES: [&'static str; 4] = [
   "src/arch/arm/start/cpu.s",
+  "src/arch/arm/start/dtb.s",
+  "src/arch/arm/start/extensions.s",
   "src/arch/arm/start/start.s",
 ];
 
@@ -21,6 +23,11 @@ fn main() {
   let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
 
   let mut cfg = cc::Build::new();
+
+  // None of the default flags are needed. The start library is assembly-only,
+  // so optimization has no effect. The cargo configuration files will set the
+  // required architecture and CPU flags.
+  cfg.no_default_flags(true);
 
   if target_arch == "aarch64" {
     configure_for_aarch64(&mut cfg);
@@ -39,10 +46,6 @@ fn main() {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_aarch64(cfg: &mut cc::Build) {
-  if let Ok(cpu_flag) = env::var("CPU_aarch64") {
-    cfg.flag(cpu_flag);
-  }
-
   cfg
     .include("src/arch/aarch64/start/include")
     .files(&AARCH64_START_FILES);
@@ -58,10 +61,6 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_arm(cfg: &mut cc::Build) {
-  if let Ok(cpu_flag) = env::var("CPU_arm") {
-    cfg.flag(cpu_flag);
-  }
-
   cfg
       .include("src/arch/arm/start/include")
       .files(&ARM_START_FILES);

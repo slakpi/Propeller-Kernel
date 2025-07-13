@@ -56,7 +56,7 @@ _start:
 // TODO: This is a temporary delay loop to give OpenOCD time
 //       to connect.
 //----------------------------------------------------------
-  ldr     x0, =0x8000000
+  ldr     x0, =0x4000000
 1:
   sub     x0, x0, #1
   cbnz    x0, 1b
