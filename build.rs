@@ -11,10 +11,11 @@ const AARCH64_START_FILES: [&'static str; 5] = [
 ];
 
 /// Files included in the ARM start library.
-const ARM_START_FILES: [&'static str; 4] = [
+const ARM_START_FILES: [&'static str; 5] = [
   "src/arch/arm/start/cpu.s",
   "src/arch/arm/start/dtb.s",
   "src/arch/arm/start/extensions.s",
+  "src/arch/arm/start/mm.s",
   "src/arch/arm/start/start.s",
 ];
 
@@ -62,8 +63,8 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
 /// * `cfg` - The start library builder.
 fn configure_for_arm(cfg: &mut cc::Build) {
   cfg
-      .include("src/arch/arm/start/include")
-      .files(&ARM_START_FILES);
+    .include("src/arch/arm/start/include")
+    .files(&ARM_START_FILES);
 
   for file in &ARM_START_FILES {
     println!("cargo:rerun-if-changed={}", file);

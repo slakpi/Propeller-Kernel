@@ -2,18 +2,6 @@
 
 .include "abi.h"
 
-// SCTLR flags. See B4.1.130. Enable the MMU, expect exception vectors at the
-// high address (0xffff_0000), enable the Access Flag, enable data caching.
-.equ SCTLR_MMU_ENABLE, 1
-.equ SCTLR_C,          (0b1 << 2)
-.equ SCTLR_V,          (0b1 << 13)
-.equ SCTLR_AFE,        (0b1 << 29)
-.equ SCTLR_FLAGS,      (SCTLR_MMU_ENABLE | SCTLR_AFE | SCTLR_V | SCTLR_C)
-
-// DACR setup. See B4.1.43. Only using domain 0 in client mode (access
-// permissions are checked).
-.equ DACR_VALUE, 0b1
-
 // ARM processor modes and SPSR default. SPSR_hyp is copied to CPSR on exception
 // return. The SPSR_hyp default configures HYP to return to SVC and leave all
 // interrupts masked. See B1.3.1 and B1.3.3.
@@ -46,7 +34,7 @@
 ///         Hypervisor mode is preferred if the core support virtualization.
 .global _start
 _start:
-  mov     r8, r2            // Save the blob pointer.
+  mov     r10, r2           // Save the blob pointer.
 
 //----------------------------------------------------------
 // TODO: This is a temporary delay loop to give OpenOCD time
@@ -130,12 +118,107 @@ primary_core_boot:
   bne     cpu_halt
 
 // Check if the blob is a DTB. The kernel does not support ATAGs.
-  mov     r0, r8
+  mov     r0, r10
   bl      dtb_quick_check
   cmp     r0, #0
   beq     cpu_halt
 
-  b       cpu_halt
+// Create the bootstrap kernel page tables.
+  mov     r1, r0            // DTB blob size to r1
+  mov     r0, r10           // DTB blob address to r0
+  ldr     r2, =__vmsplit
+  bl      mmu_create_kernel_page_tables
+
+// Save off physical addresses needed for the kernel configuration struct.
+  adr     r4, kernel_start_rel
+  ldr     r5, kernel_start_rel
+  add     r4, r4, r5
+
+  adr     r5, kernel_pages_start_rel
+  ldr     r6, kernel_pages_start_rel
+  add     r5, r5, r6
+
+  adr     r6, kernel_svc_stack_start_rel
+  ldr     r7, kernel_svc_stack_start_rel
+  add     r6, r6, r7
+
+  adr     r7, kernel_stack_list_rel
+  ldr     r8, kernel_stack_list_rel
+  add     r7, r7, r8
+
+// Setup the MMU and enable it.
+//
+//   NOTE: Manually set the link register to the virtual return address when
+//         calling `setup_and_enable_mmu`. Do not use branch-and-link.
+  ldr     lr, =primary_core_begin_virt_addressing
+  b       mmu_setup_and_enable
+primary_core_begin_virt_addressing:
+  bl      mmu_cleanup_ttbr
+  bl      setup_stacks
+
+// Write kernel configuration struct. Provide all addresses as physical.
+//
+//   +------------------------------+ 44
+//   | Primary ISR stack start      |
+//   +------------------------------+ 40
+//   | ISR stack page count         |
+//   +------------------------------+ 36
+//   | ISR stack list address       |
+//   +------------------------------+ 32
+//   | Virtual memory split         |
+//   +------------------------------+ 28
+//   | Page table area size         |
+//   +------------------------------+ 24
+//   | Physical page tables address |
+//   +------------------------------+ 20
+//   | Kernel size                  |
+//   +------------------------------+ 16
+//   | Physical kernel address      |
+//   +------------------------------+ 12
+//   | Physical blob address        |
+//   +------------------------------+ 8
+//   | Page size                    |
+//   +------------------------------+ 4
+//   | Virtual base address         |
+//   +------------------------------+ 0
+  mov     fp, sp
+  sub     sp, sp, #44
+
+  ldr     r2, =__virtual_start
+  str     r2, [sp]
+
+  ldr     r1, =__page_size
+  str     r1, [sp, #4]
+
+  str     r10, [sp, #8]
+
+  str     r4, [sp, #12]
+
+  ldr     r1, =__kernel_size
+  str     r1, [sp, #16]
+
+  str     r5, [sp, #20]
+
+  ldr     r1, =__kernel_pages_size
+  str     r1, [sp, #24]
+
+  ldr     r1, =__vmsplit
+  str     r1, [sp, #28]
+
+  str     r6, [sp, #32]
+
+  ldr     r1, =__kernel_stack_pages
+  str     r1, [sp, #36]
+
+  str     r7, [sp, #40]
+
+// Perform the rest of the kernel initialization in Rustland.
+  mov     r0, sp
+  bl      pk_init
+
+// Clear the configuration struct and jump to the scheduler.
+  mov     sp, fp
+  b       pk_scheduler
 
 
 ///-----------------------------------------------------------------------------
@@ -150,9 +233,8 @@ secondary_core_boot:
 /// Setup the kernel exception stacks using virtual addressing.
 ///
 ///   NOTE: Assumes the core is in SVC mode.
-setup_stacks_virtual:
+setup_stacks:
 // Save off the CPSR
-
   mrs     r0, cpsr
 
 // Set the SVC mode stack.

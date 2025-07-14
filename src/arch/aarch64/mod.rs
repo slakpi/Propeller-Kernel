@@ -64,6 +64,8 @@ pub fn init(config: usize) {
   let kconfig = unsafe { &*(config as *const KernelConfig) };
 
   assert_eq!(kconfig.page_size, 4096);
+
+  // Require a power-of-2 page count for the kernel stack size.
   assert!(bits::is_power_of_2(kconfig.kernel_stack_pages));
 
   unsafe {
