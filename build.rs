@@ -11,9 +11,10 @@ const AARCH64_START_FILES: [&'static str; 5] = [
 ];
 
 /// Files included in the ARM start library.
-const ARM_START_FILES: [&'static str; 5] = [
+const ARM_START_FILES: [&'static str; 6] = [
   "src/arch/arm/start/cpu.s",
   "src/arch/arm/start/dtb.s",
+  "src/arch/arm/start/exceptions.s",
   "src/arch/arm/start/extensions.s",
   "src/arch/arm/start/mm.s",
   "src/arch/arm/start/start.s",

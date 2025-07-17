@@ -1,5 +1,7 @@
 //! ARM Architecture
 
+mod exceptions;
+
 use crate::support::bits;
 
 /// Basic kernel configuration provided by the start code. All address are

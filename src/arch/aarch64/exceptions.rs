@@ -1,6 +1,8 @@
+//! AArch64 Exception Handling
+
 use crate::arch;
 
-/// AArch64 exception handler.
+/// Exception handler.
 ///
 /// # Parameters
 ///
@@ -8,6 +10,6 @@ use crate::arch;
 /// * `far_el1` - Fault Address Register value.
 /// * `cpu_context` - Pointer to the saved CPU context structure.
 #[unsafe(no_mangle)]
-extern "C" fn pk_handle_exception(esr_el1: usize, far_el1: usize, cpu_context: usize) {
+extern "C" fn pk_handle_exception(_esr_el1: usize, _far_el1: usize, _cpu_context: usize) {
   arch::common::cpu::halt();
 }

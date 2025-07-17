@@ -1,6 +1,6 @@
 //! AArch64 Architecture
 
-pub mod exceptions;
+mod exceptions;
 
 use crate::support::bits;
 
