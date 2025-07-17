@@ -201,22 +201,22 @@ primary_core_begin_virt_addressing:
 //   | Virtual base address            |
 //   +---------------------------------+ 0
   mov     fp, sp
-  sub     sp, sp, #80
+  sub     sp, sp, #8 * 10
 
   ldr     x9, =__virtual_start
   ldr     x10, =__page_size
-  stp     x9, x10, [sp]
+  stp     x9, x10, [sp, #8 * 0]
 
-  stp     x19, x20, [sp, #16]
+  stp     x19, x20, [sp, #8 * 2]
 
   ldr     x9, =__kernel_size
-  stp     x9, x21, [sp, #32]
+  stp     x9, x21, [sp, #8 * 4]
 
   ldr     x9, =__kernel_pages_size
-  stp     x9, x23, [sp, #48]
+  stp     x9, x23, [sp, #8 * 6]
 
   ldr     x9, =__kernel_stack_pages
-  stp     x9, x23, [sp, #64]
+  stp     x9, x23, [sp, #8 * 8]
 
 // Perform single-threaded kernel initialization.
   mov     x0, sp

@@ -54,7 +54,7 @@ SECTIONS
   
   __bss_size = __bss_end - __bss_start;
 
-  .data.stack : ALIGN(__page_size)
+  .data.stacks : ALIGN(__page_size)
   {
     __kernel_svc_stack_end = .;
     . += (__kernel_stack_pages * __page_size);

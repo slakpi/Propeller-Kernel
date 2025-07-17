@@ -158,59 +158,59 @@ primary_core_begin_virt_addressing:
 
 // Write kernel configuration struct. Provide all addresses as physical.
 //
-//   +------------------------------+ 44
-//   | Primary ISR stack start      |
-//   +------------------------------+ 40
-//   | ISR stack page count         |
-//   +------------------------------+ 36
-//   | ISR stack list address       |
-//   +------------------------------+ 32
-//   | Virtual memory split         |
-//   +------------------------------+ 28
-//   | Page table area size         |
-//   +------------------------------+ 24
-//   | Physical page tables address |
-//   +------------------------------+ 20
-//   | Kernel size                  |
-//   +------------------------------+ 16
-//   | Physical kernel address      |
-//   +------------------------------+ 12
-//   | Physical blob address        |
-//   +------------------------------+ 8
-//   | Page size                    |
-//   +------------------------------+ 4
-//   | Virtual base address         |
-//   +------------------------------+ 0
+//   +---------------------------------+ 44
+//   | Physical primary stack address  |
+//   +---------------------------------+ 40
+//   | ISR stack page count            |
+//   +---------------------------------+ 36
+//   | ISR stack list address          |
+//   +---------------------------------+ 32
+//   | Virtual memory split            |
+//   +---------------------------------+ 28
+//   | Page table area size            |
+//   +---------------------------------+ 24
+//   | Physical page tables address    |
+//   +---------------------------------+ 20
+//   | Kernel size                     |
+//   +---------------------------------+ 16
+//   | Physical kernel address         |
+//   +---------------------------------+ 12
+//   | Physical blob address           |
+//   +---------------------------------+ 8
+//   | Page size                       |
+//   +---------------------------------+ 4
+//   | Virtual base address            |
+//   +---------------------------------+ 0
   mov     fp, sp
-  sub     sp, sp, #44
+  sub     sp, sp, #4 * 11
 
   ldr     r2, =__virtual_start
-  str     r2, [sp]
+  str     r2, [sp, #4 * 0]
 
   ldr     r1, =__page_size
-  str     r1, [sp, #4]
+  str     r1, [sp, #4 * 1]
 
-  str     r10, [sp, #8]
+  str     r10, [sp, #4 * 2]
 
-  str     r4, [sp, #12]
+  str     r4, [sp, #4 * 3]
 
   ldr     r1, =__kernel_size
-  str     r1, [sp, #16]
+  str     r1, [sp, #4 * 4]
 
-  str     r5, [sp, #20]
+  str     r5, [sp, #4 * 5]
 
   ldr     r1, =__kernel_pages_size
-  str     r1, [sp, #24]
+  str     r1, [sp, #4 * 6]
 
   ldr     r1, =__vmsplit
-  str     r1, [sp, #28]
+  str     r1, [sp, #4 * 7]
 
-  str     r6, [sp, #32]
+  str     r6, [sp, #4 * 8]
 
   ldr     r1, =__kernel_stack_pages
-  str     r1, [sp, #36]
+  str     r1, [sp, #4 * 9]
 
-  str     r7, [sp, #40]
+  str     r7, [sp, #4 * 10]
 
 // Perform the rest of the kernel initialization in Rustland.
   mov     r0, sp
@@ -219,6 +219,8 @@ primary_core_begin_virt_addressing:
 // Clear the configuration struct and jump to the scheduler.
   mov     sp, fp
   b       pk_scheduler
+
+// We will never return from the scheduler.
 
 
 ///-----------------------------------------------------------------------------
