@@ -6,7 +6,7 @@
 pub use crate::arch::common::bits::*;
 
 /// The number of bytes in a machine word.
-pub const WORD_BYTES: usize = (usize::BITS >> 3) as usize;
+pub const WORD_BYTES: usize = (usize::BITS / 8) as usize;
 
 /// The machine word byte size shift.
 pub const WORD_SHIFT: usize = floor_log2(WORD_BYTES);

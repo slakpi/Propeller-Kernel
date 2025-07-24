@@ -2,7 +2,9 @@
 
 mod exceptions;
 
-use crate::support::bits;
+use crate::arch::cpu;
+use crate::support::{bits, dtb};
+use core::ptr;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -40,11 +42,15 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
   primary_stack_start: 0,
 };
 
+/// CPU core configuration.
+static mut CORE_CONFIG: cpu::CoreConfig = [cpu::Core::new(); cpu::MAX_CORES];
+
 /// ARM platform configuration.
 ///
 /// # Parameters
 ///
-/// * `config` - The kernel configuration address provided by the start code.
+/// * `config_addr` - The physical kernel configuration address provided by the
+/// start code.
 ///
 /// # Description
 ///
@@ -55,20 +61,27 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 ///   NOTE: Assumes the kernel stack page count is a power of two.
 ///
 ///   NOTE: Assumes the blob is a DTB.
-pub fn init(config: usize) {
+pub fn init(config_addr: usize) {
   unsafe {
     assert!(!INITIALIZED);
     INITIALIZED = true;
   }
 
-  assert_ne!(config, 0);
+  assert_ne!(config_addr, 0);
 
-  let kconfig = unsafe { &*(config as *const KernelConfig) };
+  let kconfig = unsafe { &*(config_addr as *const KernelConfig) };
 
   assert_eq!(kconfig.page_size, 4096);
 
   // Require a power-of-2 page count for the kernel stack size.
   assert!(bits::is_power_of_2(kconfig.kernel_stack_pages));
+
+  // Calculate the blob address and its page-aligned size. There is no need to
+  // do any real error checking on the size. The DTB reader will error check
+  // during scans.
+  let blob_vaddr = kconfig.virtual_base + kconfig.blob;
+  let blob_size = dtb::DtbReader::check_dtb(blob_vaddr)
+    .map_or_else(|_| 0, |size| bits::align_up(size, kconfig.page_size));
 
   // Validate the VM split and virtual base.
   assert!(
@@ -78,5 +91,38 @@ pub fn init(config: usize) {
 
   unsafe {
     KERNEL_CONFIG = *kconfig;
+  }
+
+  init_core_config(blob_vaddr);
+}
+
+/// Get the number of cores.
+///
+/// # Description
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+pub fn get_core_count() -> usize {
+  unsafe { get_core_config().len() }
+}
+
+/// Get the full core configuration.
+///
+/// # Description
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+pub fn get_core_config() -> &'static cpu::CoreConfig {
+  unsafe { ptr::addr_of!(CORE_CONFIG).as_ref().unwrap() }
+}
+
+/// Initialize the core configuration.
+///
+/// # Parameters
+///
+/// * `blob_vaddr` - The DTB blob virtual address.
+fn init_core_config(blob_vaddr: usize) {
+  unsafe {
+    assert!(cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
   }
 }
