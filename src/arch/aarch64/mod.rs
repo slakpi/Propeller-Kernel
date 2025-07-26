@@ -2,7 +2,7 @@
 
 mod exceptions;
 
-use crate::arch::cpu;
+use crate::arch::{cpu, memory};
 use crate::support::{bits, dtb};
 use core::ptr;
 
@@ -43,6 +43,10 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 /// CPU core configuration.
 static mut CORE_CONFIG: cpu::CoreConfig = [cpu::Core::new(); cpu::MAX_CORES];
 
+/// Memory layout configuration.
+static mut MEMORY_CONFIG: memory::MemoryConfig = memory::MemoryConfig::new();
+
+
 /// AArch64 platform configuration.
 ///
 /// # Parameters
@@ -54,11 +58,11 @@ static mut CORE_CONFIG: cpu::CoreConfig = [cpu::Core::new(); cpu::MAX_CORES];
 ///
 ///   NOTE: Must only be called once while the kernel is single-threaded.
 ///
-///   NOTE: Assumes 4 KiB pages.
+///   NOTE: Requires 4 KiB pages.
 ///
-///   NOTE: Assumes the kernel stack page count is a power of two.
+///   NOTE: Requires the kernel stack page count to be a power of two.
 ///
-///   NOTE: Assumes the blob is a DTB.
+///   NOTE: Requires the blob to be a DTB.
 pub fn init(config_addr: usize) {
   unsafe {
     assert!(!INITIALIZED);
@@ -69,6 +73,7 @@ pub fn init(config_addr: usize) {
 
   let kconfig = unsafe { &*(config_addr as *const KernelConfig) };
 
+  // Require 4 KiB pages.
   assert_eq!(kconfig.page_size, 4096);
 
   // Require a power-of-2 page count for the kernel stack size.
@@ -86,6 +91,7 @@ pub fn init(config_addr: usize) {
   }
 
   init_core_config(blob_vaddr);
+  init_memory_config(blob_vaddr);
 }
 
 /// Get the number of cores.
@@ -108,6 +114,16 @@ pub fn get_core_config() -> &'static cpu::CoreConfig {
   unsafe { ptr::addr_of!(CORE_CONFIG).as_ref().unwrap() }
 }
 
+/// Get the memory layout configuration.
+///
+/// # Description
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+pub fn get_memory_config() -> &'static memory::MemoryConfig {
+  unsafe { ptr::addr_of!(MEMORY_CONFIG).as_ref().unwrap() }
+}
+
 /// Initialize the core configuration.
 ///
 /// # Parameters
@@ -116,5 +132,19 @@ pub fn get_core_config() -> &'static cpu::CoreConfig {
 fn init_core_config(blob_vaddr: usize) {
   unsafe {
     assert!(cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
+  }
+}
+
+/// Initialize the memory layout configuration.
+///
+/// # Parameters
+///
+/// * `blob_vaddr` - The DTB blob virtual address.
+fn init_memory_config(blob_vaddr: usize) {
+  unsafe {
+    assert!(memory::get_memory_layout(
+      ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap(),
+      blob_vaddr
+    ));
   }
 }
