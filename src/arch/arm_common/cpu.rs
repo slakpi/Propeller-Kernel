@@ -1,6 +1,5 @@
 //! ARM Common CPU Utilities
 
-use crate::support::dtb::{DtbCursor, DtbError, DtbReader};
 use crate::support::{dtb, hash, hash_map};
 use core::cmp;
 
@@ -29,11 +28,11 @@ pub const CORE_TYPE_LEN: usize = 64;
 /// # Methods
 ///
 /// * Spin tables park each core in a loop watching a specific memory address. A
-/// core is enabled by writing the kernel start address to the watch address.
+///   core is enabled by writing the kernel start address to the watch address.
 ///
 /// * BCM2836 is the Broadcom 2836 SoC mailbox enable method. It works the same
-/// way as the spin table method, but the watch addresses are defined in the
-/// Broadcom specification rather than the DeviceTree.
+///   way as the spin table method, but the watch addresses are defined in the
+///   Broadcom specification rather than the DeviceTree.
 #[derive(Copy, Clone)]
 pub enum CoreEnableMethod {
   Invalid,
@@ -165,7 +164,11 @@ impl<'config> DtbCoreScanner<'config> {
   /// # Returns
   ///
   /// Returns Ok if able to read the node, otherwise a DTB error.
-  fn scan_cpus_node(&mut self, reader: &DtbReader, cursor: &DtbCursor) -> Result<(), DtbError> {
+  fn scan_cpus_node(
+    &mut self,
+    reader: &dtb::DtbReader,
+    cursor: &dtb::DtbCursor,
+  ) -> Result<(), dtb::DtbError> {
     let mut tmp_cursor = *cursor;
 
     while let Some(header) = reader.get_next_property(&mut tmp_cursor) {
@@ -173,16 +176,16 @@ impl<'config> DtbCoreScanner<'config> {
         Some(DtbStringTag::DtbPropAddressCells) => {
           self.addr_cells = reader
             .get_u32(&mut tmp_cursor)
-            .ok_or(DtbError::InvalidDtb)?;
+            .ok_or(dtb::DtbError::InvalidDtb)?;
         }
 
         Some(DtbStringTag::DtbPropSizeCells) => {
           let size_cells = reader
             .get_u32(&mut tmp_cursor)
-            .ok_or(DtbError::InvalidDtb)?;
+            .ok_or(dtb::DtbError::InvalidDtb)?;
 
           if size_cells != 0 {
-            return Err(DtbError::InvalidDtb);
+            return Err(dtb::DtbError::InvalidDtb);
           }
         }
 
@@ -197,7 +200,7 @@ impl<'config> DtbCoreScanner<'config> {
 
     // We need at least one address cell to read the thread identifiers.
     if self.addr_cells == 0 {
-      return Err(DtbError::InvalidDtb);
+      return Err(dtb::DtbError::InvalidDtb);
     }
 
     Ok(())
@@ -213,7 +216,11 @@ impl<'config> DtbCoreScanner<'config> {
   /// # Returns
   ///
   /// Returns Ok if able to read the node, otherwise a DTB error.
-  fn scan_cpu_node(&mut self, reader: &DtbReader, cursor: &DtbCursor) -> Result<(), DtbError> {
+  fn scan_cpu_node(
+    &mut self,
+    reader: &dtb::DtbReader,
+    cursor: &dtb::DtbCursor,
+  ) -> Result<(), dtb::DtbError> {
     let mut tmp_cursor = *cursor;
     let mut core = Core::new();
 
@@ -273,12 +280,12 @@ impl<'config> DtbCoreScanner<'config> {
   /// Returns Ok if able to read the property, otherwise a DTB error.
   fn read_compatible(
     core_type: &mut [u8],
-    reader: &DtbReader,
-    cursor: &mut DtbCursor,
-  ) -> Result<(), DtbError> {
+    reader: &dtb::DtbReader,
+    cursor: &mut dtb::DtbCursor,
+  ) -> Result<(), dtb::DtbError> {
     let compatible = reader
       .get_null_terminated_u8_slice(cursor)
-      .ok_or(DtbError::InvalidDtb)?;
+      .ok_or(dtb::DtbError::InvalidDtb)?;
     reader.skip_and_align(1, cursor);
 
     let len = cmp::min(compatible.len(), core_type.len());
@@ -298,23 +305,23 @@ impl<'config> DtbCoreScanner<'config> {
   ///
   /// Returns Ok with the enable method if valid, otherwise a DTB error.
   fn read_enable_method(
-    reader: &DtbReader,
-    cursor: &mut DtbCursor,
+    reader: &dtb::DtbReader,
+    cursor: &mut dtb::DtbCursor,
     string_map: &StringMap,
-  ) -> Result<CoreEnableMethod, DtbError> {
+  ) -> Result<CoreEnableMethod, dtb::DtbError> {
     let enable_method = reader
       .get_null_terminated_u8_slice(cursor)
-      .ok_or(DtbError::InvalidDtb)?;
+      .ok_or(dtb::DtbError::InvalidDtb)?;
     reader.skip_and_align(1, cursor);
 
     let tag = string_map
       .find(&enable_method)
-      .ok_or(DtbError::UnknownValue)?;
+      .ok_or(dtb::DtbError::UnknownValue)?;
 
     match tag {
       DtbStringTag::DtbValueSpinTable => Ok(CoreEnableMethod::SpinTable),
       DtbStringTag::DtbValueBcm2836 => Ok(CoreEnableMethod::Bcm2836),
-      _ => Err(DtbError::UnsupportedValue),
+      _ => Err(dtb::DtbError::UnsupportedValue),
     }
   }
 
@@ -337,18 +344,18 @@ impl<'config> DtbCoreScanner<'config> {
   /// Returns Ok with the core release address if valid, otherwise a DTB error.
   fn read_cpu_release_addr(
     size: usize,
-    reader: &DtbReader,
-    cursor: &mut DtbCursor,
-  ) -> Result<usize, DtbError> {
+    reader: &dtb::DtbReader,
+    cursor: &mut dtb::DtbCursor,
+  ) -> Result<usize, dtb::DtbError> {
     match size {
-      4 => Ok(reader.get_u32(cursor).ok_or(DtbError::InvalidDtb)? as usize),
+      4 => Ok(reader.get_u32(cursor).ok_or(dtb::DtbError::InvalidDtb)? as usize),
 
       8 => {
-        let addr = reader.get_u64(cursor).ok_or(DtbError::InvalidDtb)?;
-        usize::try_from(addr).or(Err(DtbError::InvalidDtb))
+        let addr = reader.get_u64(cursor).ok_or(dtb::DtbError::InvalidDtb)?;
+        usize::try_from(addr).or(Err(dtb::DtbError::InvalidDtb))
       }
 
-      _ => Err(DtbError::UnsupportedValue),
+      _ => Err(dtb::DtbError::UnsupportedValue),
     }
   }
 
@@ -373,7 +380,7 @@ impl<'config> DtbCoreScanner<'config> {
   ///
   /// * ARM - `reg` contains MPIDR bits [23:0]
   /// * AArch64 - `reg` contains MPIDR_EL1 bits [23:0]. If address cells is 2,
-  /// the second word contains MPIDR_EL1 bits [39:32].
+  ///   the second word contains MPIDR_EL1 bits [39:32].
   ///
   /// https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/cpus.txt
   ///
@@ -383,14 +390,14 @@ impl<'config> DtbCoreScanner<'config> {
   fn read_thread_id(
     size: usize,
     addr_cells: u32,
-    reader: &DtbReader,
-    cursor: &mut DtbCursor,
-  ) -> Result<u64, DtbError> {
+    reader: &dtb::DtbReader,
+    cursor: &mut dtb::DtbCursor,
+  ) -> Result<u64, dtb::DtbError> {
     let mut tmp_cursor = *cursor;
-    let count = size / DtbReader::get_reg_pair_size(addr_cells, 0);
+    let count = size / dtb::DtbReader::get_reg_pair_size(addr_cells, 0);
     let pair = reader
       .get_reg_pair(addr_cells, 0, &mut tmp_cursor)
-      .ok_or(DtbError::InvalidDtb)?;
+      .ok_or(dtb::DtbError::InvalidDtb)?;
     Ok(pair.0)
   }
 }
@@ -399,10 +406,10 @@ impl<'config> dtb::DtbScanner for DtbCoreScanner<'config> {
   /// See `dtb::DtbScanner::scan_node()`.
   fn scan_node(
     &mut self,
-    reader: &DtbReader,
+    reader: &dtb::DtbReader,
     name: &[u8],
-    cursor: &DtbCursor,
-  ) -> Result<bool, DtbError> {
+    cursor: &dtb::DtbCursor,
+  ) -> Result<bool, dtb::DtbError> {
     if name.cmp(b"cpus") == cmp::Ordering::Equal {
       _ = self.scan_cpus_node(reader, cursor)?;
     } else if name.len() >= 5 && name[..4].cmp(b"cpu@") == cmp::Ordering::Equal {
@@ -442,7 +449,7 @@ pub fn get_core_config(config: &mut CoreConfig, blob_vaddr: usize) -> bool {
 
   let mut scanner = DtbCoreScanner::new(config);
 
-  let reader = match DtbReader::new(blob_vaddr) {
+  let reader = match dtb::DtbReader::new(blob_vaddr) {
     Ok(r) => r,
     _ => return false,
   };
