@@ -3,8 +3,18 @@
 mod exceptions;
 
 use crate::arch::{cpu, memory};
-use crate::support::{bits, dtb};
+use crate::support::{bits, dtb, range};
 use core::ptr;
+
+/// Propeller requires LPAE. With LPAE enabled, pages must be 4 KiB and sections
+/// are 2 MiB at Level 2.
+const PAGE_SIZE: usize = 4096;
+
+const PAGE_SHIFT: usize = 12;
+
+const SECTION_SIZE: usize = 2 * 1024 * 1024;
+
+const SECTION_SHIFT: usize = 21;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -75,7 +85,7 @@ pub fn init(config_addr: usize) {
   let kconfig = unsafe { &*(config_addr as *const KernelConfig) };
 
   // Require 4 KiB pages.
-  assert_eq!(kconfig.page_size, 4096);
+  assert_eq!(kconfig.page_size, PAGE_SIZE);
 
   // Require a power-of-2 page count for the kernel stack size.
   assert!(bits::is_power_of_2(kconfig.kernel_stack_pages));
@@ -98,7 +108,27 @@ pub fn init(config_addr: usize) {
   }
 
   init_core_config(blob_vaddr);
-  init_memory_config(blob_vaddr);
+  init_memory_config(blob_vaddr, blob_size);
+}
+
+/// Get the size of a page.
+pub fn get_page_size() -> usize {
+  PAGE_SIZE
+}
+
+/// Get the page shift.
+pub fn get_page_shift() -> usize {
+  PAGE_SHIFT
+}
+
+/// Get the size of a section.
+pub fn get_section_size() -> usize {
+  SECTION_SIZE
+}
+
+/// Get the section shift.
+pub fn get_section_shift() -> usize {
+  SECTION_SHIFT
 }
 
 /// Get the number of cores.
@@ -147,11 +177,37 @@ fn init_core_config(blob_vaddr: usize) {
 /// # Parameters
 ///
 /// * `blob_vaddr` - The DTB blob virtual address.
-fn init_memory_config(blob_vaddr: usize) {
-  unsafe {
-    assert!(memory::get_memory_layout(
-      ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap(),
-      blob_vaddr
-    ));
+/// * `blob_size` - The size of the DTB blob.
+///
+/// # Description
+///
+/// Reads the ranges covered by memory devices from the DTB, then excludes any
+/// physical memory beyond the virtual base address, excludes 0 to the end of
+/// the section-aligned kernel, and excludes the section-aligned DTB area. The
+/// remaining physical memory is available for use.
+fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
+  let kconfig = unsafe { ptr::addr_of!(KERNEL_CONFIG).as_ref().unwrap() };
+  let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
+  let section_size = get_section_size();
+
+  assert!(memory::get_memory_layout(mem_config, blob_vaddr));
+
+  let excl = &[
+    range::Range {
+      base: kconfig.virtual_base,
+      size: usize::MAX - kconfig.virtual_base + 1,
+    },
+    range::Range {
+      base: 0,
+      size: bits::align_up(kconfig.kernel_base + kconfig.kernel_size, section_size),
+    },
+    range::Range {
+      base: kconfig.blob,
+      size: bits::align_up(blob_size, section_size),
+    },
+  ];
+
+  for range in excl {
+    mem_config.exclude_range(range);
   }
 }
