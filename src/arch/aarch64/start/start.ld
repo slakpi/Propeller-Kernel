@@ -1,6 +1,6 @@
 __page_size = 4096;
 __kernel_stack_pages = 2;
-__kernel_page_tables = 3;
+__kernel_page_tables = 16;
 __virtual_start = 0xffff000000000000;
 
 ENTRY(_start)

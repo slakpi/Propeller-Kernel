@@ -1,25 +1,6 @@
 use cc;
 use std::env;
 
-/// Files included in the AArch64 start library.
-const AARCH64_START_FILES: [&'static str; 5] = [
-  "src/arch/aarch64/start/cpu.s",
-  "src/arch/aarch64/start/dtb.s",
-  "src/arch/aarch64/start/exceptions.s",
-  "src/arch/aarch64/start/mm.s",
-  "src/arch/aarch64/start/start.s",
-];
-
-/// Files included in the ARM start library.
-const ARM_START_FILES: [&'static str; 6] = [
-  "src/arch/arm/start/cpu.s",
-  "src/arch/arm/start/dtb.s",
-  "src/arch/arm/start/exceptions.s",
-  "src/arch/arm/start/extensions.s",
-  "src/arch/arm/start/mm.s",
-  "src/arch/arm/start/start.s",
-];
-
 /// Build script entry.
 fn main() {
   let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
@@ -48,9 +29,19 @@ fn main() {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_aarch64(cfg: &mut cc::Build) {
+  const AARCH64_START_FILES: [&'static str; 5] = [
+    "src/arch/aarch64/start/cpu.s",
+    "src/arch/aarch64/start/dtb.s",
+    "src/arch/aarch64/start/exceptions.s",
+    "src/arch/aarch64/start/mm.s",
+    "src/arch/aarch64/start/start.s",
+  ];
+
   cfg
     .include("src/arch/aarch64/start/include")
     .files(&AARCH64_START_FILES);
+
+  println!("cargo:rerun-if-changed=src/arch/aarch64/start/start.ld");
 
   for file in &AARCH64_START_FILES {
     println!("cargo:rerun-if-changed={}", file);
@@ -63,9 +54,20 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_arm(cfg: &mut cc::Build) {
+  const ARM_START_FILES: [&'static str; 6] = [
+    "src/arch/arm/start/cpu.s",
+    "src/arch/arm/start/dtb.s",
+    "src/arch/arm/start/exceptions.s",
+    "src/arch/arm/start/extensions.s",
+    "src/arch/arm/start/mm.s",
+    "src/arch/arm/start/start.s",
+  ];
+
   cfg
     .include("src/arch/arm/start/include")
     .files(&ARM_START_FILES);
+
+  println!("cargo:rerun-if-changed=src/arch/arm/start/start.ld");
 
   for file in &ARM_START_FILES {
     println!("cargo:rerun-if-changed={}", file);

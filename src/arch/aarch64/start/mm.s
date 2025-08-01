@@ -92,21 +92,26 @@
 mmu_create_kernel_page_tables:
   fn_entry
 
-  stp     x19, x20, [sp, #-16]!
-  stp     x21, x22, [sp, #-16]!
-  stp     x23, x24, [sp, #-16]!
+// x19 - The section-aligned blob base address.
+// x20 - The section-aligned blob size.
+// x21 - The section-aligned kernel size.
+// x22 - The base address of the virtual L3 table.
+// x23 - The base address of the identity L3 table.
+  sub     sp, sp, #8 * 6
+  stp     x19, x20, [sp, #8 * 0]
+  stp     x21, x22, [sp, #8 * 2]
+  stp     x23, x24, [sp, #8 * 4]
 
+// Align the blob base and size on sections.
+  bl      section_align_block
   mov     x19, x0
+  mov     x20, x1
 
-// Align the blob size on a section.
-  mov     x0, x1
-  bl      section_align_size
-  mov     x20, x0
-
-// Align the size of the kernel image on a section.
-  adrp    x0, __kernel_end
-  bl      section_align_size
-  mov     x21, x0
+// Align the kernel size on a section.
+  mov     x0, #0
+  adrp    x1, __kernel_end
+  bl      section_align_block
+  mov     x21, x1
 
 // Clear the page tables.
   adrp    x0, __kernel_pages_start
@@ -166,6 +171,9 @@ mmu_create_kernel_page_tables:
   bl      map_block
 
 skip_dtb_mapping:
+  ldp     x19, x20, [sp, #8 * 0]
+  ldp     x21, x22, [sp, #8 * 2]
+  ldp     x23, x24, [sp, #8 * 4]
   fn_exit
   ret
 
@@ -223,22 +231,38 @@ mmu_cleanup:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Section-align the size with the next section higher.
+/// Section-align a memory block.
 ///
 /// # Parameters
 ///
-/// * x0 - The size to align.
+/// * x0 - The base address of the block.
+/// * x1 - The size of the block.
+///
+/// # Description
+///
+///   NOTE: Assumes the system is configured properly and there will be no
+///         addition overflow when calculating the end address.
 ///
 /// # Returns
 ///
-/// The section-aligned size.
-section_align_size:
-  mov     x9, #SECTION_SIZE - 1
-  add     x0, x0, x9
+/// The section-aligned base address and size.
+section_align_block:
+// Calculate the end address.
+  add     x9, x0, x1
 
-  mov     x9, #SECTION_SIZE
-  neg     x9, x9
-  and     x0, x0, x9
+// Calculate the section mask.
+  mov     x1, #SECTION_SIZE - 1
+
+// Section align the end address.
+  add     x9, x9, x1
+  mvn     x1, x1
+  and     x2, x2, x1
+
+// Section align the base address.
+  and     x0, x0, x1
+
+// Calculate the new size.
+  sub     x1, x2, x0
 
   ret
 

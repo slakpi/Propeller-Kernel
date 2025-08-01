@@ -23,6 +23,8 @@ pub const WORD_SHIFT: usize = floor_log2(WORD_BYTES);
 /// `boundary` is assumed to be greater than 0. If 0, the subtraction will
 /// assert.
 ///
+/// `boundary` is assumed to be a power of 2.
+///
 /// # Returns
 ///
 /// The aligned address.
@@ -41,6 +43,8 @@ pub const fn align_down(addr: usize, boundary: usize) -> usize {
 ///
 /// `boundary` is assumed to be greater than 0. If 0, the subtraction will
 /// assert.
+/// 
+/// `boundary` is assumed to be a power of 2.
 ///
 /// # Returns
 ///
@@ -48,6 +52,27 @@ pub const fn align_down(addr: usize, boundary: usize) -> usize {
 pub const fn align_up(addr: usize, boundary: usize) -> usize {
   let b = boundary - 1;
   (addr + b) & !b
+}
+
+/// Check if an address is aligned with a boundary.
+///
+/// # Parameters
+///
+/// * `addr` - The address to check.
+/// * `boundary` - The alignment boundary.
+///
+/// # Assumptions
+///
+/// `boundary` is assumed to be greater than 0. If 0, the subtraction will
+/// assert.
+///
+/// `boundary` is assumed to be a power of 2.
+///
+/// # Returns
+///
+/// True if the address is aligned, false otherwise.
+pub const fn is_aligned(addr: usize, boundary: usize) -> bool {
+  addr & !(boundary - 1) == addr
 }
 
 /// Fast check if a number is a power of 2.

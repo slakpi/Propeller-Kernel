@@ -1,6 +1,6 @@
 __page_size = 4096;
 __kernel_stack_pages = 2;
-__kernel_page_tables = 3;
+__kernel_page_tables = 16;
 __vmsplit = 3;
 __virtual_start = 0xc0000000;
 

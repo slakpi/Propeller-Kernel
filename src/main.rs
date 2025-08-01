@@ -7,6 +7,7 @@
 #![cfg_attr(debug_assertions, allow(unused))]
 
 mod arch;
+mod mm;
 mod support;
 
 use core::panic::PanicInfo;

@@ -105,6 +105,7 @@
 .global mmu_create_kernel_page_tables
 mmu_create_kernel_page_tables:
   fn_entry
+  
 // r4 - Scratch.
 // r5 - The section-aligned kernel size.
 // r6 - The saved blob base.
@@ -114,21 +115,20 @@ mmu_create_kernel_page_tables:
 // r10 - Upper L2 table address.
   push    {r4, r5, r6, r7, r8, r9, r10}
 
-  mov     r6, r0
-  mov     r7, r1
   mov     r8, r2
 
-// Align the blob size on a section.
-  mov     r0, r7
-  bl      section_align_size
-  mov     r7, r0
+// Align the blob base and size on sections.
+  bl      section_align_block
+  mov     r6, r0
+  mov     r7, r1
 
-// Align the size of the kernel area on a section.
-  adr     r0, kernel_id_pages_end_rel
-  ldr     r1, kernel_id_pages_end_rel
-  add     r0, r0, r1
-  bl      section_align_size
-  mov     r5, r0
+// Align the kernel size on a section.
+  mov     r0, #0
+  adr     r1, kernel_id_pages_end_rel
+  ldr     r2, kernel_id_pages_end_rel
+  add     r1, r1, r2
+  bl      section_align_block
+  mov     r5, r1
 
 // Initialize the indirect memory attributes
   bl      init_mair
@@ -329,23 +329,39 @@ mmu_update_table_entry_and_invalidate_local:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Section-align the size with the next section higher.
+/// Section-align a memory block.
 ///
 /// # Parameters
 ///
-/// * r0 - The size to align.
+/// * r0 - The base address of the block.
+/// * r1 - The size of the block.
+///
+/// # Description
+///
+///   NOTE: Assumes the system is configured properly and there will be no
+///         addition overflow when calculating the end address.
 ///
 /// # Returns
 ///
-/// The section-aligned size.
-section_align_size:
+/// The section-aligned base address and size.
+section_align_block:
+// Calculate the end address.
+  add     r2, r0, r1
+
+// Calculate the section mask.
   ldr     r1, =SECTION_SIZE
   sub     r1, r1, #1
-  add     r0, r0, r1
 
-  ldr     r1, =SECTION_SIZE
-  neg     r1, r1
+// Section align the end address.
+  add     r2, r2, r1
+  mvn     r1, r1
+  and     r2, r2, r1
+
+// Section align the base address.
   and     r0, r0, r1
+
+// Calculate the new size.
+  sub     r1, r2, r0
 
   mov     pc, lr
 

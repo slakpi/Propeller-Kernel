@@ -1,8 +1,10 @@
 //! AArch64 Architecture
 
 mod exceptions;
+mod mm;
 
 use crate::arch::{cpu, memory};
+use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
 use crate::support::{bits, dtb, range};
 use core::ptr;
 
@@ -11,9 +13,13 @@ const PAGE_SIZE: usize = 4096;
 
 const PAGE_SHIFT: usize = 12;
 
+const PAGE_MASK: usize = PAGE_SIZE - 1;
+
 const SECTION_SIZE: usize = 2 * 1024 * 1024;
 
 const SECTION_SHIFT: usize = 21;
+
+const SECTION_MASK: usize = SECTION_SIZE - 1;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -87,39 +93,51 @@ pub fn init(config_addr: usize) {
   // Require a power-of-2 page count for the kernel stack size.
   assert!(bits::is_power_of_2(kconfig.kernel_stack_pages));
 
-  // Calculate the blob address and its page-aligned size. There is no need to
-  // do any real error checking on the size. The DTB reader will error check
-  // during scans.
+  // Calculate the blob virtual address and get its size. There is no need to do
+  // any real error checking on the size. The DTB reader will error check during
+  // scans. However, we do require a DTB, so assert if the blob is not a valid
+  // DTB.
   let blob_vaddr = kconfig.virtual_base + kconfig.blob;
-  let blob_size = dtb::DtbReader::check_dtb(blob_vaddr)
-    .map_or_else(|_| 0, |size| bits::align_up(size, kconfig.page_size));
-
+  let blob_size = dtb::DtbReader::check_dtb(blob_vaddr).unwrap_or(0);
+  assert_ne!(blob_size, 0);
+  
   unsafe {
     KERNEL_CONFIG = *kconfig;
   }
 
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
+  init_direct_map();
 }
 
 /// Get the size of a page.
-pub fn get_page_size() -> usize {
+pub const fn get_page_size() -> usize {
   PAGE_SIZE
 }
 
 /// Get the page shift.
-pub fn get_page_shift() -> usize {
+pub const fn get_page_shift() -> usize {
   PAGE_SHIFT
 }
 
+/// Get the page alignment mask.
+pub const fn get_page_mask() -> usize {
+  PAGE_MASK
+}
+
 /// Get the size of a section.
-pub fn get_section_size() -> usize {
+pub const fn get_section_size() -> usize {
   SECTION_SIZE
 }
 
 /// Get the section shift.
-pub fn get_section_shift() -> usize {
+pub const fn get_section_shift() -> usize {
   SECTION_SHIFT
+}
+
+/// Get the section alignment mask.
+pub const fn get_section_mask() -> usize {
+  SECTION_MASK
 }
 
 /// Get the number of cores.
@@ -152,6 +170,15 @@ pub fn get_memory_config() -> &'static memory::MemoryConfig {
   unsafe { ptr::addr_of!(MEMORY_CONFIG).as_ref().unwrap() }
 }
 
+/// Get the kernel configuration.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture.
+fn get_kernel_config() -> &'static KernelConfig {
+  unsafe { ptr::addr_of!(KERNEL_CONFIG).as_ref().unwrap() }
+}
+
 /// Initialize the core configuration.
 ///
 /// # Parameters
@@ -162,7 +189,6 @@ fn init_core_config(blob_vaddr: usize) {
     assert!(cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
   }
 }
-
 
 /// Initialize the memory layout configuration.
 ///
@@ -177,12 +203,17 @@ fn init_core_config(blob_vaddr: usize) {
 /// physical memory beyond the virtual base address, excludes 0 to the end of
 /// the section-aligned kernel, and excludes the section-aligned DTB area. The
 /// remaining physical memory is available for use.
+///
+///   NOTE: Assumes the system is configured correctly and that there will not
+///         be any overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
-  let kconfig = unsafe { ptr::addr_of!(KERNEL_CONFIG).as_ref().unwrap() };
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
-  let section_size = get_section_size();
-
   assert!(memory::get_memory_layout(mem_config, blob_vaddr));
+
+  let kconfig = get_kernel_config();
+  let section_size = get_section_size();
+  let blob_start = bits::align_down(kconfig.blob, section_size);
+  let blob_size = bits::align_up(kconfig.blob + blob_size, section_size) - blob_start;
 
   let excl = &[
     range::Range {
@@ -194,12 +225,42 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
       size: bits::align_up(kconfig.kernel_base + kconfig.kernel_size, section_size),
     },
     range::Range {
-      base: kconfig.blob,
-      size: bits::align_up(blob_size, section_size),
+      base: blob_start,
+      size: blob_size,
     },
   ];
 
   for range in excl {
     mem_config.exclude_range(range);
+  }
+}
+
+/// Initialize the linear memory map.
+///
+/// # Description
+///
+/// Linearly maps the low memory area into the kernel page tables.
+fn init_direct_map() {
+  let mem_config = get_memory_config();
+  
+  // Construct a linear allocator using the reserved kernel pages area. There
+  // will be no more than three bootstrap tables, so start three pages in.
+  let kconfig = get_kernel_config();
+  let offset = 3 * get_page_size();
+  let mut allocator = LinearTableAllocator::new(
+    kconfig.kernel_pages_start + offset,
+    kconfig.kernel_pages_start + kconfig.kernel_pages_size,
+  );
+
+  for range in mem_config.get_ranges() {
+    mm::direct_map_memory(
+      kconfig.virtual_base,
+      kconfig.kernel_pages_start,
+      range.base,
+      range.size,
+      false,
+      &mut allocator,
+      MappingStrategy::Compact,
+    );
   }
 }
