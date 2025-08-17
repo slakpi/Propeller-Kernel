@@ -19,6 +19,9 @@ const MM_PAGE_TABLE_FLAG_LONG: usize = 0x3 << 0;
 const MM_BLOCK_FLAG_LONG: usize = 0x1 << 0;
 const MM_PAGE_FLAG_LONG: usize = 0x3 << 0;
 const MM_ACCESS_FLAG_LONG: usize = 0x1 << 10;
+
+/// The start code has already configured the MAIR registers. Only the memory
+/// type indices are needed here. See `mm.s`.
 const MM_NORMAL_MAIR_IDX_LONG: usize = 0x0 << 2;
 const MM_DEVICE_MAIR_IDX_LONG: usize = 0x1 << 2;
 

@@ -12,8 +12,8 @@
 .equ MM_ACCESS_RW,       (0b00 << 6)
 .equ MM_ACCESS_RO,       (0b10 << 6)
 
-.equ MMU_NORMAL_RO_FLAGS, (MM_TYPE_BLOCK | (MT_NORMAL_NC << 2) | MM_ACCESS_RO | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_FLAGS, (MM_TYPE_BLOCK | (MT_NORMAL_NC << 2) | MM_ACCESS_RW | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RO_FLAGS, (MM_TYPE_BLOCK | (MT_NORMAL << 2) | MM_ACCESS_RO | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RW_FLAGS, (MM_TYPE_BLOCK | (MT_NORMAL << 2) | MM_ACCESS_RW | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RO_FLAGS, (MM_TYPE_BLOCK | (MT_DEVICE_nGnRnE << 2) | MM_ACCESS_RO | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RW_FLAGS, (MM_TYPE_BLOCK | (MT_DEVICE_nGnRnE << 2) | MM_ACCESS_RW | MM_ACCESS_FLAG)
 
@@ -57,7 +57,7 @@
 .equ TCR_EL1_TG1_4K, (2 << 30)
 .equ TCR_EL1_VALUE,  (TCR_EL1_T0SZ | TCR_EL1_T1SZ | TCR_EL1_TG0_4K | TCR_EL1_TG1_4K)
 
-// EL1 memory attribute indirection register configuration.
+// EL1 memory attribute indirection register configuration. See D17.2.97.
 //
 //   * Configure attribute 0 to tag pages as non Gathering, non Re-ordering,
 //     non Early Write Acknowledgement. This is a restriction we will apply to
@@ -65,12 +65,13 @@
 //     with no relative re-ordering and we get an acknowledgement from the
 //     peripheral.
 //
-//   * For now, normal memory will be non-caching.
+//   * Configure attribute 1 to tag pages as normal memory. Inner and outer
+//     write-back cacheable with allocation on read or write.
 .equ MT_DEVICE_nGnRnE,       0x0
-.equ MT_NORMAL_NC,           0x1
+.equ MT_NORMAL,              0x1
 .equ MT_DEVICE_nGnRnE_FLAGS, 0x00
-.equ MT_NORMAL_NC_FLAGS,     0x44
-.equ MAIR_EL1_VALUE,         ((MT_DEVICE_nGnRnE_FLAGS << (8 * MT_DEVICE_nGnRnE)) | (MT_NORMAL_NC_FLAGS << (8 * MT_NORMAL_NC)))
+.equ MT_NORMAL_FLAGS,        0xff
+.equ MAIR_EL1_VALUE,         ((MT_DEVICE_nGnRnE_FLAGS << (8 * MT_DEVICE_nGnRnE)) | (MT_NORMAL_FLAGS << (8 * MT_NORMAL)))
 
 // EL1 MMU enable bit.
 .equ SCTLR_EL1_MMU_ENABLE, (1 << 0)

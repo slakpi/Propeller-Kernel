@@ -9,6 +9,7 @@
 mod arch;
 mod mm;
 mod support;
+mod sync;
 
 use core::panic::PanicInfo;
 

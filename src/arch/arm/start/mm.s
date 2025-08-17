@@ -34,8 +34,13 @@
 .equ MM_ACCESS_RW,       (0x0 << 6)
 .equ MM_ACCESS_RO,       (0x2 << 6)
 
+// Device memory. See B4.1.104.
 .equ MM_DEVICE_ATTR,     0x04
-.equ MM_NORMAL_ATTR,     0x44
+
+// Normal memory; inner and outer write-back cacheable with allocation on read
+// or write. See B4.1.104.
+.equ MM_NORMAL_ATTR,     0xff
+
 .equ MM_MAIR0_VALUE,     ((MM_DEVICE_ATTR << 8) | MM_NORMAL_ATTR)
 .equ MM_MAIR1_VALUE,     0
 

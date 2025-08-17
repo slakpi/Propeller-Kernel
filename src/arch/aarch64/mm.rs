@@ -16,10 +16,13 @@ const LEVEL_4_SHIFT: usize = super::get_page_shift() + INDEX_SHIFT;
 const MM_PAGE_TABLE_FLAG: usize = 0x3 << 0;
 const MM_PAGE_FLAG: usize = 0x3 << 0;
 const MM_BLOCK_FLAG: usize = 0x1 << 0;
-const MM_NORMAL_FLAG: usize = 0x1 << 2;
-const MM_DEVICE_FLAG: usize = 0x0 << 2;
 const _MM_RO_FLAG: usize = 0x10 << 6;
 const MM_ACCESS_FLAG: usize = 0x1 << 10;
+
+/// The start code has already configured the MAIR registers. Only the memory
+/// type indices are needed here. See `mm.s`.
+const MM_DEVICE_MAIR_IDX: usize = 0x0 << 2;
+const MM_NORMAL_MAIR_IDX: usize = 0x1 << 2;
 
 const TABLE_SIZE: usize = super::get_page_size();
 const PAGE_MASK: usize = super::get_page_size() - 1;
@@ -412,7 +415,7 @@ fn make_block_descriptor(phys_addr: usize, device: bool) -> usize {
   let mut entry = (phys_addr & ADDR_MASK) | MM_ACCESS_FLAG | MM_BLOCK_FLAG;
 
   if device {
-    entry |= MM_DEVICE_FLAG;
+    entry |= MM_DEVICE_MAIR_IDX;
   }
 
   entry
@@ -429,10 +432,10 @@ fn make_block_descriptor(phys_addr: usize, device: bool) -> usize {
 ///
 /// The new page descriptor.
 fn make_page_descriptor(phys_addr: usize, device: bool) -> usize {
-  let mut entry = (phys_addr & ADDR_MASK) | MM_ACCESS_FLAG | MM_NORMAL_FLAG | MM_PAGE_FLAG;
+  let mut entry = (phys_addr & ADDR_MASK) | MM_ACCESS_FLAG | MM_NORMAL_MAIR_IDX | MM_PAGE_FLAG;
 
   if device {
-    entry |= MM_DEVICE_FLAG;
+    entry |= MM_DEVICE_MAIR_IDX;
   }
 
   entry
