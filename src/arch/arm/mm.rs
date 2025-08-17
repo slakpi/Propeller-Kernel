@@ -4,17 +4,30 @@ use crate::mm::{MappingStrategy, table_allocator::TableAllocator};
 use crate::support::bits;
 use core::{cmp, ptr, slice};
 
-const LEVEL_1_SHIFT_LONG: usize = 30;
-const LEVEL_2_SHIFT_LONG: usize = 21;
-const LEVEL_3_SHIFT_LONG: usize = 12;
+const LEVEL_1_TABLE_SHIFT_LONG: usize = 2;
+const LEVEL_2_TABLE_SHIFT_LONG: usize = 9;
+const LEVEL_3_TABLE_SHIFT_LONG: usize = 9;
 
-const INDEX_SHIFT_LONG: usize = 9;
-const INDEX_MASK_LONG: usize = (1 << INDEX_SHIFT_LONG) - 1;
+const LEVEL_3_SHIFT_LONG: usize = super::get_page_shift();
+const LEVEL_2_SHIFT_LONG: usize = LEVEL_3_SHIFT_LONG + LEVEL_3_TABLE_SHIFT_LONG;
+const LEVEL_1_SHIFT_LONG: usize = LEVEL_2_SHIFT_LONG + LEVEL_2_TABLE_SHIFT_LONG;
 
-const TABLE_SIZE_LONG: usize = 512 * 8;
+const LEVEL_1_INDEX_MASK_LONG: usize = (1 << LEVEL_1_TABLE_SHIFT_LONG) - 1;
+const LEVEL_2_INDEX_MASK_LONG: usize = (1 << LEVEL_2_TABLE_SHIFT_LONG) - 1;
+const LEVEL_3_INDEX_MASK_LONG: usize = (1 << LEVEL_3_TABLE_SHIFT_LONG) - 1;
 
-const ADDR_MASK_LONG: usize = 0xffff_f000;
-const ADDR_MASK_HIGH_LONG: usize = 0x0000_00ff;
+const TABLE_SIZE_LONG: usize = super::get_page_size();
+
+/// If using 40-bit virtual addresses, bits [39:32] of the address are bits
+/// [7:0] of the high descriptor word.
+const ADDR_MASK_HIGH_LONG: usize = 0xff;
+
+/// Bits [31:n] of the physical address are bits [31:n] of the low descriptor
+/// word where `n` is 30, 21, or 12 for Levels 1, 2, and 3 respectively.
+const LEVEL_3_ADDR_MASK_LONG: usize = usize::MAX & !((1 << LEVEL_3_SHIFT_LONG) - 1);
+const LEVEL_2_ADDR_MASK_LONG: usize = LEVEL_3_ADDR_MASK_LONG << LEVEL_3_TABLE_SHIFT_LONG;
+const LEVEL_1_ADDR_MASK_LONG: usize = LEVEL_2_ADDR_MASK_LONG << LEVEL_2_TABLE_SHIFT_LONG;
+
 const MM_PAGE_TABLE_FLAG_LONG: usize = 0x3 << 0;
 const MM_BLOCK_FLAG_LONG: usize = 0x1 << 0;
 const MM_PAGE_FLAG_LONG: usize = 0x3 << 0;
@@ -22,8 +35,8 @@ const MM_ACCESS_FLAG_LONG: usize = 0x1 << 10;
 
 /// The start code has already configured the MAIR registers. Only the memory
 /// type indices are needed here. See `mm.s`.
-const MM_NORMAL_MAIR_IDX_LONG: usize = 0x0 << 2;
-const MM_DEVICE_MAIR_IDX_LONG: usize = 0x1 << 2;
+const MM_NORMAL_MAIR_IDX_LONG: usize = 0x0;
+const MM_DEVICE_MAIR_IDX_LONG: usize = 0x1;
 
 const TYPE_MASK: usize = 0x3;
 
@@ -47,9 +60,9 @@ enum TableLevel {
 /// * `device` - Whether this block or page maps to device memory.
 /// * `allocator` - The allocator that will provide new table pages.
 /// * `strategy` - The mapping strategy.
-/// 
+///
 /// # Description
-/// 
+///
 /// Direct mapping maps a physical address PA to a virtual address VA where
 /// `VA = PA + virtual base`.
 pub fn direct_map_memory(
@@ -170,16 +183,9 @@ fn fill_table(
   strategy: MappingStrategy,
 ) {
   match strategy {
-    MappingStrategy::Compact => fill_table_compact(
-      virtual_base,
-      table_level,
-      table_addr,
-      virt,
-      base,
-      size,
-      device,
-      allocator,
-    ),
+    MappingStrategy::Compact => {
+      fill_table_compact(virtual_base, table_level, table_addr, virt, base, size, device, allocator)
+    }
     MappingStrategy::Granular => fill_table_granular(
       virtual_base,
       table_level,
@@ -427,6 +433,7 @@ fn get_next_table(table_level: TableLevel) -> Option<TableLevel> {
 ///
 /// # Parameters
 ///
+/// * `table_level` - The table level of the new entry.
 /// * `desc` - The lower 32-bits of the descriptor.
 /// * `desc_high` - The upper 32-bits of the descriptor.
 ///
@@ -438,9 +445,14 @@ fn get_next_table(table_level: TableLevel) -> Option<TableLevel> {
 /// # Returns
 ///
 /// The physical address.
-fn get_phys_addr_from_descriptor(desc: usize, desc_high: usize) -> usize {
+fn get_phys_addr_from_descriptor(table_level: TableLevel, desc: usize, desc_high: usize) -> usize {
   assert_eq!(desc_high & ADDR_MASK_HIGH_LONG, 0);
-  desc & ADDR_MASK_LONG
+
+  match table_level {
+    TableLevel::Level1 => desc & LEVEL_1_ADDR_MASK_LONG,
+    TableLevel::Level2 => desc & LEVEL_2_ADDR_MASK_LONG,
+    TableLevel::Level3 => desc & LEVEL_3_ADDR_MASK_LONG,
+  }
 }
 
 /// Create a table descriptor appropriate to the specified table level.
@@ -470,6 +482,12 @@ fn make_descriptor(
     MM_NORMAL_MAIR_IDX_LONG
   };
 
+  let phys_addr = match table_level {
+    TableLevel::Level1 => phys_addr & LEVEL_1_ADDR_MASK_LONG,
+    TableLevel::Level2 => phys_addr & LEVEL_2_ADDR_MASK_LONG,
+    TableLevel::Level3 => phys_addr & LEVEL_3_ADDR_MASK_LONG,
+  };
+
   match table_level {
     TableLevel::Level2 => Some(make_block_descriptor(phys_addr, mair_idx)),
     TableLevel::Level3 => Some(make_page_descriptor(phys_addr, mair_idx)),
@@ -484,14 +502,15 @@ fn make_descriptor(
 /// * `phys_addr` - The physical address of the block or page.
 /// * `mair_idx` - The block attributes MAIR index.
 ///
+/// # Description
+///
+/// This function should not be called directly.
+///
 /// # Returns
 ///
 /// A tuple with the low and high 32-bits of the descriptor.
 fn make_block_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
-  (
-    phys_addr | mair_idx | MM_ACCESS_FLAG_LONG | MM_BLOCK_FLAG_LONG,
-    0,
-  )
+  (phys_addr | (mair_idx << 2) | MM_ACCESS_FLAG_LONG | MM_BLOCK_FLAG_LONG, 0)
 }
 
 /// Make a Level 3 page descriptor.
@@ -499,43 +518,56 @@ fn make_block_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
 /// # Parameters
 ///
 /// * `phys_addr` - The physical address of the block or page.
-/// * `mair_idx` - The block attributes MAIR index.
+/// * `mair_idx` - The page attributes MAIR index.
+///
+/// # Description
+///
+/// This function should not be called directly.
 ///
 /// # Returns
 ///
 /// A tuple with the low and high 32-bits of the descriptor.
 fn make_page_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
-  (
-    phys_addr | mair_idx | MM_ACCESS_FLAG_LONG | MM_PAGE_FLAG_LONG,
-    0,
-  )
+  (phys_addr | (mair_idx << 2) | MM_ACCESS_FLAG_LONG | MM_PAGE_FLAG_LONG, 0)
 }
 
 /// Determine if a descriptor is a table pointer.
 ///
 /// # Parameters
 ///
+/// * `table_level` - The table level of the new entry.
 /// * `desc` - The lower 32-bits of the descriptor.
 /// * `desc_high` - The upper 32-bits of the descriptor.
 ///
 /// # Returns
 ///
 /// True if the descriptor is a page table pointer, false otherwise.
-fn is_pointer_entry(desc: usize, _desc_high: usize) -> bool {
-  desc & TYPE_MASK == MM_PAGE_TABLE_FLAG_LONG
+fn is_pointer_entry(table_level: TableLevel, desc: usize, _desc_high: usize) -> bool {
+  match table_level {
+    TableLevel::Level1 | TableLevel::Level2 => desc & TYPE_MASK == MM_PAGE_TABLE_FLAG_LONG,
+    _ => false,
+  }
 }
 
 /// Make a pointer descriptor to a lower level page table.
 ///
 /// # Parameters
 ///
+/// * `table_level` - The table level of the new entry.
 /// * `phys_addr` - The physical address of the table.
 ///
 /// # Returns
 ///
-/// A tuple with the low and high 32-bits of the descriptor.
-fn make_pointer_descriptor(phys_addr: usize) -> (usize, usize) {
-  ((phys_addr & ADDR_MASK_LONG) | MM_PAGE_TABLE_FLAG_LONG, 0)
+/// A tuple with the low and high 32-bits of the descriptor, or None if the
+/// table level is invalid.
+fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<(usize, usize)> {
+  let phys_addr = match table_level {
+    TableLevel::Level1 => phys_addr & LEVEL_1_ADDR_MASK_LONG,
+    TableLevel::Level2 => phys_addr & LEVEL_2_ADDR_MASK_LONG,
+    TableLevel::Level3 => return None,
+  };
+
+  Some((phys_addr | MM_PAGE_TABLE_FLAG_LONG, 0))
 }
 
 /// Get the descriptor index for a virtual address in the specified table.
@@ -561,9 +593,9 @@ fn make_pointer_descriptor(phys_addr: usize) -> (usize, usize) {
 /// The index into the table at the specified level.
 fn get_descriptor_index(virt_addr: usize, table_level: TableLevel) -> usize {
   match table_level {
-    TableLevel::Level1 => ((virt_addr >> LEVEL_1_SHIFT_LONG) & 0x3usize) << 1,
-    TableLevel::Level2 => ((virt_addr >> LEVEL_2_SHIFT_LONG) & INDEX_MASK_LONG) << 1,
-    TableLevel::Level3 => ((virt_addr >> LEVEL_3_SHIFT_LONG) & INDEX_MASK_LONG) << 1,
+    TableLevel::Level1 => ((virt_addr >> LEVEL_1_SHIFT_LONG) & LEVEL_1_INDEX_MASK_LONG) << 1,
+    TableLevel::Level2 => ((virt_addr >> LEVEL_2_SHIFT_LONG) & LEVEL_2_INDEX_MASK_LONG) << 1,
+    TableLevel::Level3 => ((virt_addr >> LEVEL_3_SHIFT_LONG) & LEVEL_3_INDEX_MASK_LONG) << 1,
   }
 }
 
@@ -624,14 +656,15 @@ fn alloc_table_and_fill(
   strategy: MappingStrategy,
 ) -> (usize, usize) {
   let next_level = get_next_table(table_level).unwrap();
-  let mut next_addr = get_phys_addr_from_descriptor(desc, desc_high);
+  let mut next_addr = get_phys_addr_from_descriptor(table_level, desc, desc_high);
   let mut desc = desc;
   let mut desc_high = desc_high;
 
   // TODO: It is probably fine to overwrite a section descriptor. If the memory
   //       configuration is overwriting itself, then we probably have something
-  //       wrong and a memory trap is the right outcome.
-  if !is_pointer_entry(desc, desc_high) {
+  //       wrong and an exception is the right outcome if the configuration is
+  //       invalid.
+  if !is_pointer_entry(table_level, desc, desc_high) {
     // Let an assert occur if we cannot allocate a table.
     next_addr = allocator.alloc_table().unwrap();
 
@@ -641,20 +674,10 @@ fn alloc_table_and_fill(
       ptr::write_bytes((virtual_base + next_addr) as *mut u8, 0, TABLE_SIZE_LONG);
     }
 
-    (desc, desc_high) = make_pointer_descriptor(next_addr);
+    (desc, desc_high) = make_pointer_descriptor(table_level, next_addr).unwrap();
   }
 
-  fill_table(
-    virtual_base,
-    next_level,
-    next_addr,
-    virt,
-    base,
-    size,
-    device,
-    allocator,
-    strategy,
-  );
+  fill_table(virtual_base, next_level, next_addr, virt, base, size, device, allocator, strategy);
 
   (desc, desc_high)
 }

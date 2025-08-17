@@ -34,28 +34,25 @@
 .equ MM_ACCESS_RW,       (0x0 << 6)
 .equ MM_ACCESS_RO,       (0x2 << 6)
 
-// Device memory. See B4.1.104.
-.equ MM_DEVICE_ATTR,     0x04
+// Memory attribute indirection register configuration. See B4.1.104.
+//
+//   * Configure attribute 0 to tag pages as normal memory. Inner and outer
+//     write-back cacheable with allocation on read or write.
+//
+//   * Configure attribute 1 to tag pages as device memory.
+.equ MT_NORMAL_IDX,   0x0
+.equ MT_NORMAL_SHIFT, (MT_NORMAL_IDX << 3)
+.equ MT_DEVICE_IDX,   0x1
+.equ MT_DEVICE_SHIFT, (MT_DEVICE_IDX << 3)
+.equ MT_NORMAL_ATTR,  0xff
+.equ MT_DEVICE_ATTR,  0x04
+.equ MAIR0_VALUE,     ((MT_DEVICE_ATTR << MT_DEVICE_SHIFT) | (MT_NORMAL_ATTR << MT_NORMAL_SHIFT))
+.equ MAIR1_VALUE,     0
 
-// Normal memory; inner and outer write-back cacheable with allocation on read
-// or write. See B4.1.104.
-.equ MM_NORMAL_ATTR,     0xff
-
-.equ MM_MAIR0_VALUE,     ((MM_DEVICE_ATTR << 8) | MM_NORMAL_ATTR)
-.equ MM_MAIR1_VALUE,     0
-
-.equ MM_NORMAL_MAIR_IDX, (0x0 << 2)
-.equ MM_DEVICE_MAIR_IDX, (0x1 << 2)
-
-.equ MMU_NORMAL_RO_BLOCK_FLAGS, (MM_TYPE_BLOCK | MM_ACCESS_RO | MM_NORMAL_MAIR_IDX | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_BLOCK_FLAGS, (MM_TYPE_BLOCK | MM_ACCESS_RW | MM_NORMAL_MAIR_IDX | MM_ACCESS_FLAG)
-.equ MMU_DEVICE_RO_BLOCK_FLAGS, (MM_TYPE_BLOCK | MM_ACCESS_RO | MM_DEVICE_MAIR_IDX | MM_ACCESS_FLAG)
-.equ MMU_DEVICE_RW_BLOCK_FLAGS, (MM_TYPE_BLOCK | MM_ACCESS_RW | MM_DEVICE_MAIR_IDX | MM_ACCESS_FLAG)
-
-.equ MMU_NORMAL_RO_PAGE_FLAGS, (MM_TYPE_PAGE | MM_ACCESS_RO | MM_NORMAL_MAIR_IDX | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_PAGE_FLAGS, (MM_TYPE_PAGE | MM_ACCESS_RW | MM_NORMAL_MAIR_IDX | MM_ACCESS_FLAG)
-.equ MMU_DEVICE_RO_PAGE_FLAGS, (MM_TYPE_PAGE | MM_ACCESS_RO | MM_DEVICE_MAIR_IDX | MM_ACCESS_FLAG)
-.equ MMU_DEVICE_RW_PAGE_FLAGS, (MM_TYPE_PAGE | MM_ACCESS_RW | MM_NORMAL_MAIR_IDX | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
+.equ MMU_DEVICE_RO_FLAGS, (MM_ACCESS_RO | (MT_DEVICE_IDX << 2) | MM_ACCESS_FLAG)
+.equ MMU_DEVICE_RW_FLAGS, (MM_ACCESS_RW | (MT_DEVICE_IDX << 2) | MM_ACCESS_FLAG)
 
 .equ VEC_L2_OFFSET, 0xff8
 .equ VEC_L3_OFFSET, 0xf80
@@ -77,15 +74,12 @@
 .equ L1_TABLE_SHIFT,     2
 .equ L2_TABLE_SHIFT,     9
 .equ L3_TABLE_SHIFT,     9
-.equ SECTION_SHIFT,      (PAGE_SHIFT + L3_TABLE_SHIFT)
-.equ SECTION_SIZE,       (1 << SECTION_SHIFT)
 .equ L1_TABLE_ENTRY_CNT, (1 << L1_TABLE_SHIFT)
 .equ L2_TABLE_ENTRY_CNT, (1 << L2_TABLE_SHIFT)
 .equ L3_TABLE_ENTRY_CNT, (1 << L3_TABLE_SHIFT)
-
-.equ L3_SHIFT, PAGE_SHIFT
-.equ L2_SHIFT, (PAGE_SHIFT + L3_TABLE_SHIFT)
-.equ L1_SHIFT, (L2_SHIFT + L2_TABLE_SHIFT)
+.equ SECTION_SHIFT,      (PAGE_SHIFT + L3_TABLE_SHIFT)
+.equ SECTION_SIZE,       (1 << SECTION_SHIFT)
+.equ L1_SHIFT,           (SECTION_SHIFT + L2_TABLE_SHIFT)
 
 ///-----------------------------------------------------------------------------
 ///
@@ -178,7 +172,7 @@ mmu_create_kernel_page_tables:
   ldr     r2, =__virtual_start
   add     r3, r2, r5
   sub     r3, r3, #1
-  ldr     r4, =MMU_NORMAL_RW_BLOCK_FLAGS
+  ldr     r4, =MMU_NORMAL_RW_FLAGS | MM_TYPE_BLOCK
   push    {r4}
   bl      map_block
   pop     {r4}
@@ -195,7 +189,7 @@ mmu_create_kernel_page_tables:
   add     r2, r2, r6
   add     r3, r2, r7
   sub     r3, r3, #1
-  ldr     r4, =MMU_NORMAL_RO_BLOCK_FLAGS
+  ldr     r4, =MMU_NORMAL_RO_FLAGS | MM_TYPE_BLOCK
   push    {r4}
   bl      map_block
   pop     {r4}
@@ -232,7 +226,7 @@ mmu_create_kernel_page_tables:
   mov     r2, #0
   add     r3, r2, r5
   sub     r3, r3, #1
-  ldr     r4, =MMU_NORMAL_RW_BLOCK_FLAGS
+  ldr     r4, =MMU_NORMAL_RW_FLAGS | MM_TYPE_BLOCK
   push    {r4}
   bl      map_block
   pop     {r4}
@@ -404,7 +398,7 @@ map_vectors:
   add     r3, r0, r3
 
 // Make the descriptor for the vectors.
-  ldr     r2, =MMU_NORMAL_RO_PAGE_FLAGS
+  ldr     r2, =MMU_NORMAL_RO_FLAGS | MM_TYPE_PAGE
   orr     r1, r1, r2
   mov     r2, #0
   str     r1, [r3], #4
@@ -424,10 +418,10 @@ map_vectors:
 ///
 /// Initialize the indirect memory attribute registers.
 init_mair:
-  ldr     r0, =MM_MAIR0_VALUE
+  ldr     r0, =MAIR0_VALUE
   mcr     p15, 0, r0, c10, c2, 0
 
-  ldr     r0, =MM_MAIR1_VALUE
+  ldr     r0, =MAIR1_VALUE
   mcr     p15, 0, r0, c10, c2, 1
 
   mov     pc, lr

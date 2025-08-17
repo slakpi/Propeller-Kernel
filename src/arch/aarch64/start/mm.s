@@ -12,11 +12,6 @@
 .equ MM_ACCESS_RW,       (0b00 << 6)
 .equ MM_ACCESS_RO,       (0b10 << 6)
 
-.equ MMU_NORMAL_RO_FLAGS, (MM_TYPE_BLOCK | (MT_NORMAL << 2) | MM_ACCESS_RO | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_FLAGS, (MM_TYPE_BLOCK | (MT_NORMAL << 2) | MM_ACCESS_RW | MM_ACCESS_FLAG)
-.equ MMU_DEVICE_RO_FLAGS, (MM_TYPE_BLOCK | (MT_DEVICE_nGnRnE << 2) | MM_ACCESS_RO | MM_ACCESS_FLAG)
-.equ MMU_DEVICE_RW_FLAGS, (MM_TYPE_BLOCK | (MT_DEVICE_nGnRnE << 2) | MM_ACCESS_RW | MM_ACCESS_FLAG)
-
 /// 2 MiB section virtual address layout:
 ///
 ///   +---------------+--------+--------+--------+--------------------+
@@ -32,12 +27,11 @@
 ///   63             48       39       30       21       12           0
 .equ PAGE_SHIFT,      12
 .equ TABLE_SHIFT,     9
+.equ TABLE_ENTRY_CNT, (1 << TABLE_SHIFT)
 .equ SECTION_SHIFT,   (PAGE_SHIFT + TABLE_SHIFT)
 .equ SECTION_SIZE,    (1 << SECTION_SHIFT)
-.equ TABLE_ENTRY_CNT, (1 << TABLE_SHIFT)
-
-.equ L1_SHIFT, (PAGE_SHIFT + (3 * TABLE_SHIFT))
-.equ L2_SHIFT, (PAGE_SHIFT + (2 * TABLE_SHIFT))
+.equ L2_SHIFT,        (SECTION_SHIFT + TABLE_SHIFT)
+.equ L1_SHIFT,        (L2_SHIFT + TABLE_SHIFT)
 
 // EL1 translation control register configuration.
 //
@@ -59,19 +53,26 @@
 
 // EL1 memory attribute indirection register configuration. See D17.2.97.
 //
-//   * Configure attribute 0 to tag pages as non Gathering, non Re-ordering,
+//   * Configure attribute 0 to tag pages as normal memory. Inner and outer
+//     write-back cacheable with allocation on read or write.
+//
+//   * Configure attribute 1 to tag pages as non Gathering, non Re-ordering,
 //     non Early Write Acknowledgement. This is a restriction we will apply to
 //     the peripheral memory to ensure writes are done exactly as specified
 //     with no relative re-ordering and we get an acknowledgement from the
 //     peripheral.
-//
-//   * Configure attribute 1 to tag pages as normal memory. Inner and outer
-//     write-back cacheable with allocation on read or write.
-.equ MT_DEVICE_nGnRnE,       0x0
-.equ MT_NORMAL,              0x1
-.equ MT_DEVICE_nGnRnE_FLAGS, 0x00
-.equ MT_NORMAL_FLAGS,        0xff
-.equ MAIR_EL1_VALUE,         ((MT_DEVICE_nGnRnE_FLAGS << (8 * MT_DEVICE_nGnRnE)) | (MT_NORMAL_FLAGS << (8 * MT_NORMAL)))
+.equ MT_NORMAL_IDX,          0x0
+.equ MT_NORMAL_SHIFT,        (MT_NORMAL_IDX << 3)
+.equ MT_DEVICE_nGnRnE_IDX,   0x1
+.equ MT_DEVICE_nGnRnE_SHIFT, (MT_DEVICE_nGnRnE_IDX << 3)
+.equ MT_NORMAL_ATTR,         0xff
+.equ MT_DEVICE_nGnRnE_ATTR,  0x00
+.equ MAIR_EL1_VALUE,         ((MT_DEVICE_nGnRnE_ATTR << MT_DEVICE_nGnRnE_SHIFT) | (MT_NORMAL_ATTR << MT_NORMAL_SHIFT))
+
+.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
+.equ MMU_DEVICE_RO_FLAGS, (MM_ACCESS_RO | (MT_DEVICE_nGnRnE_IDX << 2) | MM_ACCESS_FLAG)
+.equ MMU_DEVICE_RW_FLAGS, (MM_ACCESS_RW | (MT_DEVICE_nGnRnE_IDX << 2) | MM_ACCESS_FLAG)
 
 // EL1 MMU enable bit.
 .equ SCTLR_EL1_MMU_ENABLE, (1 << 0)
@@ -136,7 +137,8 @@ mmu_create_kernel_page_tables:
   bl      init_tables
   mov     x23, x0
 
-// Map the kernel area as RW normal memory.
+// Map the kernel area as RW normal memory in both the virtual and identity
+// tables.
 //
 //   TODO: The code should probably be separate from the stack and page tables
 //         to prevent the code from being re-written.
@@ -145,7 +147,7 @@ mmu_create_kernel_page_tables:
   ldr     x2, =__virtual_start
   add     x3, x2, x21
   sub     x3, x3, #1
-  mov     x4, #MMU_NORMAL_RW_FLAGS
+  mov     x4, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_BLOCK)
   bl      map_block
 
   mov     x0, x23
@@ -153,7 +155,7 @@ mmu_create_kernel_page_tables:
   mov     x2, #0
   add     x3, x2, x21
   sub     x3, x3, #1
-  mov     x4, #MMU_NORMAL_RW_FLAGS
+  mov     x4, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_BLOCK)
   bl      map_block
 
 // Map the DTB area as RO normal memory. Skip this if the DTB size is zero.
@@ -168,7 +170,7 @@ mmu_create_kernel_page_tables:
   add     x2, x2, x19
   add     x3, x2, x20
   sub     x3, x3, #1
-  mov     x4, #MMU_NORMAL_RO_FLAGS
+  mov     x4, #(MMU_NORMAL_RO_FLAGS | MM_TYPE_BLOCK)
   bl      map_block
 
 skip_dtb_mapping:
@@ -203,7 +205,7 @@ mmu_setup_and_enable:
   msr     tcr_el1, x9
 
   ldr     x9, =MAIR_EL1_VALUE
-  msr     mair_el1, x0
+  msr     mair_el1, x9
 
   isb
   mrs     x9, sctlr_el1
