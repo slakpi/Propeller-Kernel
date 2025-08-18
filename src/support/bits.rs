@@ -43,7 +43,7 @@ pub const fn align_down(addr: usize, boundary: usize) -> usize {
 ///
 /// `boundary` is assumed to be greater than 0. If 0, the subtraction will
 /// assert.
-/// 
+///
 /// `boundary` is assumed to be a power of 2.
 ///
 /// # Returns

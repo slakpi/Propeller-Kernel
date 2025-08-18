@@ -113,7 +113,9 @@ pub fn init(config_addr: usize) {
       || (kconfig.vm_split == 2 && kconfig.virtual_base == 0x8000_0000)
   );
 
-  unsafe { KERNEL_CONFIG = *kconfig; }
+  unsafe {
+    KERNEL_CONFIG = *kconfig;
+  }
 
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);

@@ -100,7 +100,7 @@ pub fn init(config_addr: usize) {
   let blob_vaddr = kconfig.virtual_base + kconfig.blob;
   let blob_size = dtb::DtbReader::check_dtb(blob_vaddr).unwrap_or(0);
   assert_ne!(blob_size, 0);
-  
+
   unsafe {
     KERNEL_CONFIG = *kconfig;
   }
@@ -242,7 +242,7 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 /// Linearly maps the low memory area into the kernel page tables.
 fn init_direct_map() {
   let mem_config = get_memory_config();
-  
+
   // Construct a linear allocator using the reserved kernel pages area. There
   // will be no more than three bootstrap tables, so start three pages in.
   let kconfig = get_kernel_config();
