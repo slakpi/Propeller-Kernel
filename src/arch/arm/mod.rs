@@ -146,28 +146,6 @@ pub fn init(config_addr: usize) {
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map();
   init_bootstrap_task();
-
-  let lcl_addr = Task::map_page_local(0x3900_0000, false);
-
-  let mut test_addr = 0usize;
-  unsafe {
-    asm!(
-      "mcr p15, 0, {in_addr}, c7, c8, 0",
-      "isb",
-      "mrc p15, 0, {out_addr}, c7, c4, 0",
-      in_addr = in(reg) lcl_addr,
-      out_addr = inout(reg) test_addr,
-    );
-  }
-
-  let lcl_page = unsafe { slice::from_raw_parts_mut(lcl_addr as *mut usize, 1024) };
-  lcl_page[0] = 42;
-
-  let lcl_addr2 = Task::map_page_local(0x3900_0000, false);
-  let lcl_page2 = unsafe { slice::from_raw_parts_mut(lcl_addr2 as *mut usize, 1024) };
-
-  Task::unmap_page_local();
-  Task::unmap_page_local();
 }
 
 /// Get the size of a page.

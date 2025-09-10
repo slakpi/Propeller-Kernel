@@ -7,12 +7,24 @@
 /// extensions for long page descriptors. TTBCR.T0SZ is 0 to let the user
 /// segment fill the virtual addresses not used by the kernel segment.
 /// TTBCR.T1SZ is either 1 for a 2/2 split or 2 for a 3/1 split.
+///
+/// TTBCR.IRGN1/0 and TTBCR.ORGN1/0 control the inner/outer cacheability for
+/// memory associated with the page tables expected in TTBR1/0. These tell the
+/// MMU whether to use the cache or read memory, so they MUST match the
+/// cacheability attributes referenced in MAIR. But default, no cacheing is
+/// assumed and the MMU will read directly from memory. Configure the MMU to
+/// expect normal write-back, write-allocate for both the inner and outer
+/// regions in TTBR1 and TTBR0.
 .equ TTBCR_EAE,    (0x1 << 31)
 .equ TTBCR_A1,     (0x0 << 22)
 .equ TTBCR_T1SZ_2, (0x1 << 16)
 .equ TTBCR_T1SZ_3, (0x2 << 16)
 .equ TTBCR_T0SZ,   (0x0 << 0)
-.equ TTBCR_VALUE,  (TTBCR_EAE | TTBCR_A1 | TTBCR_T0SZ)
+.equ TTBCR_IRGN1,  (0b01 << 24)
+.equ TTBCR_IRGN0,  (0b01 << 8)
+.equ TTBCR_ORGN1,  (0b01 << 26)
+.equ TTBCR_ORGN0,  (0b01 << 10)
+.equ TTBCR_VALUE,  (TTBCR_EAE | TTBCR_A1 | TTBCR_T0SZ | TTBCR_IRGN1 | TTBCR_IRGN0 | TTBCR_ORGN1 | TTBCR_ORGN0)
 
 // SCTLR flags. See B4.1.130. Enable the MMU, expect exception vectors at the
 // high address (0xffff_0000), enable the Access Flag, enable data caching.
@@ -44,7 +56,7 @@
 .equ MT_NORMAL_SHIFT, (MT_NORMAL_IDX << 3)
 .equ MT_DEVICE_IDX,   0x1
 .equ MT_DEVICE_SHIFT, (MT_DEVICE_IDX << 3)
-.equ MT_NORMAL_ATTR,  0x44
+.equ MT_NORMAL_ATTR,  0xff
 .equ MT_DEVICE_ATTR,  0x04
 .equ MAIR0_VALUE,     ((MT_DEVICE_ATTR << MT_DEVICE_SHIFT) | (MT_NORMAL_ATTR << MT_NORMAL_SHIFT))
 .equ MAIR1_VALUE,     0
