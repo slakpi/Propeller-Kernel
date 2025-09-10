@@ -1,7 +1,7 @@
 //! ARM Low-Level Exception Handling
 
 // Size of the exception handler stack frame.
-.equ EXCEPTION_FRAME_SIZE, 64
+.equ EXCEPTION_FRAME_SIZE, 68
 
 .equ UNDEFINED_INSTRUCTION_EXCEPTION, 1
 .equ SUPERVISOR_CALL_EXCEPTION,       2
@@ -42,7 +42,11 @@
   str     r12, [sp, #4 * 12]
 // Skip the stack pointer.
   str     r14, [sp, #4 * 14]
-  str     r15, [sp, #4 * 15] 
+  str     r15, [sp, #4 * 15]
+// Read the data fault status register. This value is only useful on a data
+// exception.
+  mrc     p15, 0, r0, c5, c0, 0
+  str     r0, [sp, #4 * 16]
 .endm
 
 

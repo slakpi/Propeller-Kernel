@@ -4,6 +4,17 @@ use crate::mm::{MappingStrategy, table_allocator::TableAllocator};
 use crate::support::bits;
 use core::{cmp, ptr, slice};
 
+unsafe extern "C" {
+  fn mmu_update_table_entry_local(
+    desc_vaddr: usize,
+    virt_addr: usize,
+    desc: usize,
+    desc_high: usize,
+  );
+  
+  fn mmu_invalidate_caches();
+}
+
 const LEVEL_1_TABLE_SHIFT_LONG: usize = 2;
 const LEVEL_2_TABLE_SHIFT_LONG: usize = 9;
 const LEVEL_3_TABLE_SHIFT_LONG: usize = 9;
@@ -67,7 +78,6 @@ enum TableLevel {
 /// `VA = PA + virtual base`.
 pub fn direct_map_memory(
   virtual_base: usize,
-  split: usize,
   pages_start: usize,
   base: usize,
   size: usize,
@@ -79,7 +89,7 @@ pub fn direct_map_memory(
 
   fill_table(
     virtual_base,
-    get_first_table_level(virtual_base, split, virt),
+    get_first_table_level(virtual_base, virt),
     pages_start,
     virt,
     base,
@@ -95,7 +105,6 @@ pub fn direct_map_memory(
 /// # Parameters
 ///
 /// * `virtual_base` - The kernel segment base address.
-/// * `split` - The virtual memory split.
 /// * `pages_start` - The address of the task's starting page table.
 /// * `virt` - Base of the virtual address range.
 /// * `base` - Base of the physical address range.
@@ -110,7 +119,6 @@ pub fn direct_map_memory(
 /// `VA = (PA - base) + virt`.
 pub fn map_memory(
   virtual_base: usize,
-  split: usize,
   pages_start: usize,
   virt: usize,
   base: usize,
@@ -121,7 +129,7 @@ pub fn map_memory(
 ) {
   fill_table(
     virtual_base,
-    get_first_table_level(virtual_base, split, virt),
+    get_first_table_level(virtual_base, virt),
     pages_start,
     virt,
     base,
@@ -132,12 +140,138 @@ pub fn map_memory(
   );
 }
 
+/// Maps a thread-local mapping table into the kernel's address space.
+///
+/// # Parameters
+///
+/// * `pages_start` - The physical address of the starting kernel page table.
+/// * `local_virt` - The virtual address of the core's thread local area.
+/// * `table_addr` - The physical address of the task's local mappings table.
+///
+/// # Description
+///
+/// If using a 2/2 split, the kernel has a Level 1 table, and we need to get the
+/// address of the Level 2 table that covers the thread local area. Otherwise,
+/// if using a 3/1 split, the kernel starts at a Level 2 table.
+///
+/// The thread-local mapping table is mapped by adding a table entry to the
+/// Level 2 table.
+pub fn map_thread_local_table(pages_start: usize, local_virt: usize, table_addr: usize) {
+  let virtual_base = super::get_kernel_virtual_base();
+  let start_level = get_first_table_level(virtual_base, local_virt);
+  let l2_addr: usize;
+
+  if start_level == TableLevel::Level1 {
+    let table = get_table(virtual_base + pages_start);
+    let idx = get_descriptor_index(local_virt, start_level);
+    l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]);
+  } else {
+    l2_addr = pages_start;
+  }
+
+  let l2_vaddr = virtual_base + l2_addr;
+  let idx = get_descriptor_index(local_virt, TableLevel::Level2);
+  let desc_vaddr = l2_vaddr + (idx << bits::WORD_SHIFT);
+  let (desc, desc_high) = make_pointer_descriptor(TableLevel::Level2, table_addr).unwrap();
+
+  unsafe {
+    mmu_update_table_entry_local(desc_vaddr, local_virt, desc, desc_high);
+  }
+}
+
+/// Map a page in the task's local mappings.
+///
+/// # Parameters
+///
+/// * `table` - The task's local mapping table.
+/// * `section_vaddr` - The base virtual address of the core's local section.
+/// * `page_addr` - The physical address of the page to map.
+/// * `count` - The number of mappings currently in the table.
+/// * `device` - Whether this page maps to device memory.
+///
+/// # Description
+///
+/// Adds the page to the task's local mappings and invalidates the current
+/// core's TLB for the virtual address assigned to the page.
+///
+/// # Assumptions
+///
+/// Assumes there is room in the table for the mapping.
+///
+/// # Returns
+///
+/// The virtual address assigned to the page.
+pub fn map_page_local(
+  table: &mut [usize],
+  section_vaddr: usize,
+  page_addr: usize,
+  count: usize,
+  device: bool,
+) -> usize {
+  if page_addr < super::get_high_mem_base() {
+    return super::get_kernel_virtual_base() + page_addr;
+  }
+
+  let idx = count << 1;
+  let page_vaddr = section_vaddr + (count << super::get_page_shift());
+  let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
+  let (desc, desc_high) = make_descriptor(TableLevel::Level3, page_addr, device).unwrap();
+
+  unsafe {
+    mmu_update_table_entry_local(desc_vaddr, page_vaddr, desc, desc_high);
+  }
+
+  page_vaddr
+}
+
+/// Unmaps the most recent page from the task's local mappings.
+///
+/// # Parameters
+///
+/// * `table` - The task's local mapping table.
+/// * `section_vaddr` - The base virtual address of the core's local section.
+/// * `count` - The number of mappings currently in the table.
+///
+/// # Description
+///
+/// Removes the most recently added page from the task's local mappings table
+/// and invalidates the current core's TLB for the virtual address assigned to
+/// the page.
+///
+/// # Assumptions
+///
+/// Assumes at least one page is in the table.
+pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize) {
+  let idx = (count - 1) << 1;
+
+  if table[idx] == 0 {
+    return;
+  }
+
+  let page_vaddr = section_vaddr + ((count - 1) << super::get_page_shift());
+  let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
+
+  unsafe {
+    mmu_update_table_entry_local(desc_vaddr, page_vaddr, 0, 0);
+  }
+}
+
+/// Invalidate caches after translation table update.
+///
+/// # Description
+///
+/// This function fully invalidates the TLB and Branch Predictors, and is
+/// appropriate for task context changes or large changes to the kernel's
+/// translation tables.
+pub fn invalidate_caches() {
+  unsafe { mmu_invalidate_caches() };
+}
+
 /// Get the first table level to translate a given virtual address.
 ///
 /// # Parameters
 ///
 /// * `virtual_base` - The kernel segment base address.
-/// * `split` - The virtual memory split.
 /// * `virt_addr` - The virtual address.
 ///
 /// # Description
@@ -150,7 +284,9 @@ pub fn map_memory(
 ///
 /// Level 2 if the virtual address is in the kernel address space and a 3/1
 /// split is in use. Otherwise, Level 1.
-fn get_first_table_level(virtual_base: usize, split: usize, virt_addr: usize) -> TableLevel {
+fn get_first_table_level(virtual_base: usize, virt_addr: usize) -> TableLevel {
+  let split = super::get_kernel_config().vm_split;
+
   if (virt_addr >= virtual_base) && (split == 3) {
     TableLevel::Level2
   } else {
@@ -561,11 +697,12 @@ fn is_pointer_entry(table_level: TableLevel, desc: usize, _desc_high: usize) -> 
 /// A tuple with the low and high 32-bits of the descriptor, or None if the
 /// table level is invalid.
 fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<(usize, usize)> {
-  let phys_addr = match table_level {
-    TableLevel::Level1 => phys_addr & LEVEL_1_ADDR_MASK_LONG,
-    TableLevel::Level2 => phys_addr & LEVEL_2_ADDR_MASK_LONG,
-    TableLevel::Level3 => return None,
-  };
+  assert!(bits::is_aligned(phys_addr, super::get_page_size()));
+
+  // Level 3 tables cannot have pointer entries.
+  if table_level == TableLevel::Level3 {
+    return None;
+  }
 
   Some((phys_addr | MM_PAGE_TABLE_FLAG_LONG, 0))
 }
@@ -605,9 +742,9 @@ fn get_descriptor_index(virt_addr: usize, table_level: TableLevel) -> usize {
 ///
 /// * `table_vaddr` - The table virtual address.
 ///
-/// # Description
+/// # Assumptions
 ///
-///   NOTE: Assumes all tables to be TABLE_SIZE_LONG including Level 1 tables.
+/// Assumes all tables to be TABLE_SIZE_LONG including Level 1 tables.
 ///
 /// # Returns
 ///

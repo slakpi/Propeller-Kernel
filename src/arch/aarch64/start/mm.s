@@ -241,10 +241,10 @@ mmu_cleanup:
 /// * x0 - The base address of the block.
 /// * x1 - The size of the block.
 ///
-/// # Description
+/// # Assumptions
 ///
-///   NOTE: Assumes the system is configured properly and there will be no
-///         addition overflow when calculating the end address.
+/// Assumes the system is configured properly and there will be no addition
+/// overflow when calculating the end address.
 ///
 /// # Returns
 ///

@@ -44,7 +44,7 @@
 .equ MT_NORMAL_SHIFT, (MT_NORMAL_IDX << 3)
 .equ MT_DEVICE_IDX,   0x1
 .equ MT_DEVICE_SHIFT, (MT_DEVICE_IDX << 3)
-.equ MT_NORMAL_ATTR,  0xff
+.equ MT_NORMAL_ATTR,  0x44
 .equ MT_DEVICE_ATTR,  0x04
 .equ MAIR0_VALUE,     ((MT_DEVICE_ATTR << MT_DEVICE_SHIFT) | (MT_NORMAL_ATTR << MT_NORMAL_SHIFT))
 .equ MAIR1_VALUE,     0
@@ -123,8 +123,8 @@ mmu_create_kernel_page_tables:
 
 // Align the kernel size on a section.
   mov     r0, #0
-  adr     r1, kernel_id_pages_end_rel
-  ldr     r2, kernel_id_pages_end_rel
+  adr     r1, kernel_pages_end_rel
+  ldr     r2, kernel_pages_end_rel
   add     r1, r1, r2
   bl      section_align_block
   mov     r5, r1
@@ -294,8 +294,8 @@ mmu_cleanup_ttbr:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Update an entry in a translation table and invalidate the caches on this
-/// core only.
+/// Update an entry in a translation table and selectively invalidate the caches
+/// by virtual address.
 ///
 /// # Parameters
 ///
@@ -306,20 +306,44 @@ mmu_cleanup_ttbr:
 ///
 /// # Description
 ///
-/// This function should only be used when updating sections of the translation
-/// tables that are used by a single core. For example, updating a task's local
-/// mapping table.
-.global mmu_update_table_entry_and_invalidate_local
-mmu_update_table_entry_and_invalidate_local:
-// Make the new entry.
+/// The unified TLB and Branch Predictors will be invalidated for the virtual
+/// address being remapped. This function is appropriate for precision changes
+/// to the translation tables, e.g. swapping a task's local mapping table into
+/// the kernel's address space or mapping a page locally.
+.global mmu_update_table_entry_local
+mmu_update_table_entry_local:
+// Make the new entry and ensure visibility. Cleaning the cache line when the
+// table is write-back cacheable memory is not required with an ARMv7
+// implementation that includes multiprocessing extensions.
   str     r2, [r0], #4
   str     r3, [r0], #4
   dsb
 
-// Invalidate unified TLB and Branch Predictor by virtual address on this core
-// only (See TLBIMVA in B3.18.7 and BPIMVA in B3.18.6).
+// Invalidate unified TLB and Branch Predictor by virtual address (See TLBIMVA
+// in B3.18.7 and BPIMVA in B3.18.6), and ensure completion.
   mcr     p15, 0, r1, c8, c7, 1
   mcr     p15, 0, r1, c7, c5, 7
+  dsb
+  isb
+
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate caches after translation table update.
+///
+/// # Description
+///
+/// This function fully invalidates the TLB and Branch Predictors, and is
+/// appropriate for mass changes such as swapping a task's translation tables
+/// into TTBR0 or a large change to the kernel's translation tables.
+.global mmu_invalidate_caches
+mmu_invalidate_caches:
+// See TLBIALL in B3.18.7 and BPIALL in B3.18.6
+  mov     r0, #0
+  mcr     p15, 0, r0, c8, c7, 0
+  mcr     p15, 0, r0, c7, c5, 6
   dsb
   isb
 
@@ -335,10 +359,10 @@ mmu_update_table_entry_and_invalidate_local:
 /// * r0 - The base address of the block.
 /// * r1 - The size of the block.
 ///
-/// # Description
+/// # Assumptions
 ///
-///   NOTE: Assumes the system is configured properly and there will be no
-///         addition overflow when calculating the end address.
+/// Assumes the system is configured properly and there will be no addition
+/// overflow when calculating the end address.
 ///
 /// # Returns
 ///
@@ -376,9 +400,11 @@ section_align_block:
 ///
 /// # Description
 ///
-///     NOTE: Assumes that the page after the L2 table is free.
-///
 /// Creates a L3 table with entries for the exception vector pages.
+///
+/// # Assumptions
+///
+/// Assumes that the page after the L2 table is free.
 map_vectors:
 // Get the address for the new L3 table.
   ldr     r2, =__page_size
@@ -438,12 +464,14 @@ init_mair:
 ///
 /// # Description
 ///
-///   NOTE: Assumes that a 2/2 virtual memory split is being used and creates
-///         entries for two L2 tables that cover the 2 GiB of the address space.
-///
 ///   NOTE: When using a 2/2 split, the input address size is 31 bits, so only
 ///         bit 30 is used to index the Level 1 table. This means both Level 1
 ///         tables use entries 0 and 1.
+///
+/// # Assumptions
+///
+/// Assumes that a 2/2 virtual memory split is being used and creates entries
+/// for two L2 tables that cover the 2 GiB of the address space.
 ///
 /// # Returns
 ///

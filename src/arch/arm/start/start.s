@@ -234,7 +234,9 @@ secondary_core_boot:
 ///
 /// Setup the kernel exception stacks using virtual addressing.
 ///
-///   NOTE: Assumes the core is in SVC mode.
+/// # Assumptions
+///
+/// Assumes the core is in SVC mode.
 setup_stacks:
 // Save off the CPSR
   mrs     r0, cpsr

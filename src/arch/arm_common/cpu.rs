@@ -373,8 +373,6 @@ impl<'config> DtbCoreScanner<'config> {
   /// The `reg` property is an array of thread identifiers for each hardware
   /// thread supported by the core.
   ///
-  ///   NOTE: Assumes one thread per core.
-  ///
   /// For ARM, the thread ID may include the 2nd, 3rd, and 4th (AArch64)
   /// affinity levels. For example, Linux requires:
   ///
@@ -383,6 +381,10 @@ impl<'config> DtbCoreScanner<'config> {
   ///   the second word contains MPIDR_EL1 bits [39:32].
   ///
   /// https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/cpus.txt
+  ///
+  /// # Assumptions
+  ///
+  /// Assumes one thread per core.
   ///
   /// # Returns
   ///

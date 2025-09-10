@@ -3,6 +3,8 @@
 mod exceptions;
 mod mm;
 
+pub mod task;
+
 use crate::arch::{cpu, memory};
 use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
 use crate::support::{bits, dtb, range};
@@ -20,6 +22,12 @@ const SECTION_SIZE: usize = 2 * 1024 * 1024;
 const SECTION_SHIFT: usize = 21;
 
 const SECTION_MASK: usize = SECTION_SIZE - 1;
+
+/// The size of the virtual area reserved for the page directory (2 TiB).
+const PAGE_DIRECTORY_SIZE: usize = 0x200_0000_0000;
+
+/// The base virtual address of the page directory.
+const PAGE_DIRECTORY_VIRTUAL_BASE: usize = 0xffff_fe00_0000_0000;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -204,8 +212,10 @@ fn init_core_config(blob_vaddr: usize) {
 /// the section-aligned kernel, and excludes the section-aligned DTB area. The
 /// remaining physical memory is available for use.
 ///
-///   NOTE: Assumes the system is configured correctly and that there will not
-///         be any overflow when calculating end of the kernel or blob..
+/// # Assumptions
+///
+/// Assumes the system is configured correctly and that there will not be any
+/// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
   assert!(memory::get_memory_layout(mem_config, blob_vaddr));
@@ -263,4 +273,6 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
+
+  todo!("Invalidate caches")
 }

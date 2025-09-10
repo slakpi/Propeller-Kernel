@@ -10,6 +10,7 @@ mod arch;
 mod mm;
 mod support;
 mod sync;
+mod task;
 
 use core::panic::PanicInfo;
 

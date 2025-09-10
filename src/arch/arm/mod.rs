@@ -3,10 +3,14 @@
 mod exceptions;
 mod mm;
 
+pub mod task;
+
 use crate::arch::{cpu, memory};
 use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
 use crate::support::{bits, dtb, range};
-use core::ptr;
+use crate::task::Task;
+use core::{ptr, slice};
+use core::arch::asm;
 
 /// Propeller requires LPAE. With LPAE enabled, pages must be 4 KiB and sections
 /// are 2 MiB at Level 2.
@@ -24,6 +28,15 @@ const SECTION_MASK: usize = SECTION_SIZE - 1;
 
 /// Reserve the upper 128 MiB of the kernel segment for the high memory area.
 const HIGH_MEM_SIZE: usize = 128 * 1024 * 1024;
+
+/// The base virtual address of the exception vectors.
+const VECTORS_VIRTUAL_BASE: usize = 0xffff_0000;
+
+/// The size of the virtual area reserved for the page directory.
+const PAGE_DIRECTORY_SIZE: usize = 32 * 1024 * 1024;
+
+/// The base virtual address of the page directory.
+const PAGE_DIRECTORY_VIRTUAL_BASE: usize = VECTORS_VIRTUAL_BASE - PAGE_DIRECTORY_SIZE;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -66,6 +79,18 @@ static mut CORE_CONFIG: cpu::CoreConfig = [cpu::Core::new(); cpu::MAX_CORES];
 
 /// Memory layout configuration.
 static mut MEMORY_CONFIG: memory::MemoryConfig = memory::MemoryConfig::new();
+
+/// The base virtual address of the thread local mapping area.
+static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
+
+/// The bootstrap task is a special task that exists only to provide a way to
+/// manage high memory mappings before the kernel allocators and scheduler are
+/// initialized. The bootstrap task will only be used by the primary core.
+///
+/// Once the kernel maps system memory, initializes the kernel allocators,
+/// initializes the scheduler, and enables the secondary cores, the bootstrap
+/// task will be replaced by the real init thread tasks.
+static mut BOOTSTRAP_TASK: Task = Task::new(0);
 
 /// ARM platform configuration.
 ///
@@ -120,6 +145,29 @@ pub fn init(config_addr: usize) {
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map();
+  init_bootstrap_task();
+
+  let lcl_addr = Task::map_page_local(0x3900_0000, false);
+
+  let mut test_addr = 0usize;
+  unsafe {
+    asm!(
+      "mcr p15, 0, {in_addr}, c7, c8, 0",
+      "isb",
+      "mrc p15, 0, {out_addr}, c7, c4, 0",
+      in_addr = in(reg) lcl_addr,
+      out_addr = inout(reg) test_addr,
+    );
+  }
+
+  let lcl_page = unsafe { slice::from_raw_parts_mut(lcl_addr as *mut usize, 1024) };
+  lcl_page[0] = 42;
+
+  let lcl_addr2 = Task::map_page_local(0x3900_0000, false);
+  let lcl_page2 = unsafe { slice::from_raw_parts_mut(lcl_addr2 as *mut usize, 1024) };
+
+  Task::unmap_page_local();
+  Task::unmap_page_local();
 }
 
 /// Get the size of a page.
@@ -170,6 +218,17 @@ pub fn get_kernel_base() -> usize {
 ///         one-time initialization is assumed.
 pub fn get_kernel_virtual_base() -> usize {
   unsafe { KERNEL_CONFIG.virtual_base }
+}
+
+/// Get the base virtual address of the thread local area for the current core.
+///
+/// # Description
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_thread_local_virtual_base() -> usize {
+  let offset = cpu::get_id() * get_section_size();
+  unsafe { THREAD_LOCAL_VIRTUAL_BASE + offset }
 }
 
 /// Get the base physical address of the high memory area.
@@ -241,8 +300,10 @@ fn init_core_config(blob_vaddr: usize) {
 /// the section-aligned kernel, and excludes the section-aligned DTB area. The
 /// remaining physical memory is available for use.
 ///
-///   NOTE: Assumes the system is configured correctly and that there will not
-///         be any overflow when calculating end of the kernel or blob..
+/// # Assumptions
+///
+/// Assumes the system is configured correctly and that there will not be any
+/// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
   assert!(memory::get_memory_layout(mem_config, blob_vaddr));
@@ -278,6 +339,18 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 ///
 /// Linearly maps the low memory area into the kernel page tables.
 fn init_direct_map() {
+  // Calculate the base of the thread local area.
+  let core_count = get_core_count();
+  let section_size = get_section_size();
+  let thread_local_size = section_size * core_count;
+
+  unsafe {
+    THREAD_LOCAL_VIRTUAL_BASE = bits::align_down(
+      PAGE_DIRECTORY_VIRTUAL_BASE - thread_local_size,
+      section_size,
+    );
+  }
+
   // The memory layout already excludes any physical memory beyond the kernel /
   // user split. However, we still need to mask off physical memory that cannot
   // be linearly mapped into the low memory area.
@@ -302,7 +375,6 @@ fn init_direct_map() {
   for range in low_mem.get_ranges() {
     mm::direct_map_memory(
       kconfig.virtual_base,
-      kconfig.vm_split,
       kconfig.kernel_pages_start,
       range.base,
       range.size,
@@ -311,4 +383,33 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
+  
+  mm::invalidate_caches();
+}
+
+/// Initialize the bootstrap task.
+///
+/// # Description
+///
+/// There is no need to go through the normal context switch process. The
+/// bootstrap task is technically already running. We only need to set the
+/// running task pointer on the primary core and map the task's local mapping
+/// table into the kernel page tables.
+///
+/// # Assumptions
+///
+/// Assumes the caller is running on the primary core.
+pub fn init_bootstrap_task() {
+  let task_ptr = unsafe { ptr::addr_of!(BOOTSTRAP_TASK) };
+  let task = unsafe { task_ptr.as_ref().unwrap() };
+  let table_vaddr = task.get_context().get_local_mapping_table_addr();
+  let table_addr = table_vaddr - get_kernel_virtual_base();
+  let pages_start = get_kernel_config().kernel_pages_start;
+
+  task::set_current_task_addr(task_ptr as usize);
+
+  // Map the task's local mapping table into the kernel address space. The
+  // assumption is that the caller is running on the primary core, so the table
+  // maps to the beginning of the thread-local area.
+  mm::map_thread_local_table(pages_start, get_thread_local_virtual_base(), table_addr);
 }
