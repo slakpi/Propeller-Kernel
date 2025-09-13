@@ -118,4 +118,6 @@ SECTIONS
   }
 
   __kernel_pages_size = __kernel_pages_end - __kernel_pages_start;
+
+  __kernel_end = __kernel_pages_end;
 }

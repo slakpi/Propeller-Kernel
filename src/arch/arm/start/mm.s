@@ -135,8 +135,8 @@ mmu_create_kernel_page_tables:
 
 // Align the kernel size on a section.
   mov     r0, #0
-  adr     r1, kernel_pages_end_rel
-  ldr     r2, kernel_pages_end_rel
+  adr     r1, kernel_end_rel
+  ldr     r2, kernel_end_rel
   add     r1, r1, r2
   bl      section_align_block
   mov     r5, r1
@@ -631,3 +631,5 @@ kernel_pages_start_rel:
   .word __kernel_pages_start - kernel_pages_start_rel
 kernel_pages_end_rel:
   .word __kernel_pages_end - kernel_pages_end_rel
+kernel_end_rel:
+  .word __kernel_end - kernel_end_rel

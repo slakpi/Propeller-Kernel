@@ -9,8 +9,7 @@ use crate::arch::{cpu, memory};
 use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
 use crate::support::{bits, dtb, range};
 use crate::task::Task;
-use core::{ptr, slice};
-use core::arch::asm;
+use core::ptr;
 
 /// Propeller requires LPAE. With LPAE enabled, pages must be 4 KiB and sections
 /// are 2 MiB at Level 2.
