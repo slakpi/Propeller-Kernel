@@ -314,7 +314,8 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 ///
 /// # Description
 ///
-/// Linearly maps the low memory area into the kernel page tables.
+/// Linearly maps the low memory area into the kernel page tables. Invalidating
+/// the TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
   // Calculate the base of the thread local area.
   let core_count = get_core_count();
@@ -322,10 +323,8 @@ fn init_direct_map() {
   let thread_local_size = section_size * core_count;
 
   unsafe {
-    THREAD_LOCAL_VIRTUAL_BASE = bits::align_down(
-      PAGE_DIRECTORY_VIRTUAL_BASE - thread_local_size,
-      section_size,
-    );
+    THREAD_LOCAL_VIRTUAL_BASE =
+      bits::align_down(PAGE_DIRECTORY_VIRTUAL_BASE - thread_local_size, section_size);
   }
 
   // The memory layout already excludes any physical memory beyond the kernel /
@@ -360,8 +359,6 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
-  
-  mm::invalidate_caches();
 }
 
 /// Initialize the bootstrap task.

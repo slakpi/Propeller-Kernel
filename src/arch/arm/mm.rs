@@ -11,8 +11,6 @@ unsafe extern "C" {
     desc: usize,
     desc_high: usize,
   );
-  
-  fn mmu_invalidate_caches();
 }
 
 const LEVEL_1_TABLE_SHIFT_LONG: usize = 2;
@@ -31,18 +29,23 @@ const TABLE_SIZE_LONG: usize = super::get_page_size();
 
 /// If using 40-bit virtual addresses, bits [39:32] of the address are bits
 /// [7:0] of the high descriptor word.
-const ADDR_MASK_HIGH_LONG: usize = 0xff;
+const ADDR_MASK_HIGH_MASK_LONG: usize = 0xff;
 
-/// Bits [31:n] of the physical address are bits [31:n] of the low descriptor
-/// word where `n` is 30, 21, or 12 for Levels 1, 2, and 3 respectively.
-const LEVEL_3_ADDR_MASK_LONG: usize = usize::MAX & !((1 << LEVEL_3_SHIFT_LONG) - 1);
-const LEVEL_2_ADDR_MASK_LONG: usize = LEVEL_3_ADDR_MASK_LONG << LEVEL_3_TABLE_SHIFT_LONG;
-const LEVEL_1_ADDR_MASK_LONG: usize = LEVEL_2_ADDR_MASK_LONG << LEVEL_2_TABLE_SHIFT_LONG;
+/// When using 4 KiB pages with a 32-bit output address, bits [31:12] are the
+/// physical address of a table or page pointer. Bits [31:21] are the physical
+/// address of a 2 MiB block at Level 2.
+const TABLE_OR_PAGE_LOW_MASK_LONG: usize = 0xffff_f000;
+const LEVEL_1_BLOCK_LOW_MASK_LONG: usize = 0xc000_0000;
+const LEVEL_2_BLOCK_LOW_MASK_LONG: usize = 0xffe0_0000;
 
-const MM_PAGE_TABLE_FLAG_LONG: usize = 0x3 << 0;
-const MM_BLOCK_FLAG_LONG: usize = 0x1 << 0;
-const MM_PAGE_FLAG_LONG: usize = 0x3 << 0;
-const MM_ACCESS_FLAG_LONG: usize = 0x1 << 10;
+/// Bits [1:0] are the entry type. 0b11 indicates a table pointer entry at
+/// Levels 1 and 2, and indicates a page entry at Level 3. 0b01 indicates a
+/// block entry at Levels 1 and 2, but is invalid at Level 3. 0bn0 always
+/// indicates an invalid entry regardless of `n`.
+const MM_PAGE_TABLE_FLAG_LONG: usize = 0b11 << 0;
+const MM_PAGE_FLAG_LONG: usize = 0b11 << 0;
+const MM_BLOCK_FLAG_LONG: usize = 0b01 << 0;
+const MM_ACCESS_FLAG_LONG: usize = 0b1 << 10;
 
 /// The start code has already configured the MAIR registers. Only the memory
 /// type indices are needed here. See `mm.s`.
@@ -164,7 +167,7 @@ pub fn map_thread_local_table(pages_start: usize, local_virt: usize, table_addr:
   if start_level == TableLevel::Level1 {
     let table = get_table(virtual_base + pages_start);
     let idx = get_descriptor_index(local_virt, start_level);
-    l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]);
+    l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]).unwrap();
   } else {
     l2_addr = pages_start;
   }
@@ -254,17 +257,6 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
   unsafe {
     mmu_update_table_entry_local(desc_vaddr, page_vaddr, 0, 0);
   }
-}
-
-/// Invalidate caches after translation table update.
-///
-/// # Description
-///
-/// This function fully invalidates the TLB and Branch Predictors, and is
-/// appropriate for task context changes or large changes to the kernel's
-/// translation tables.
-pub fn invalidate_caches() {
-  unsafe { mmu_invalidate_caches() };
 }
 
 /// Get the first table level to translate a given virtual address.
@@ -580,14 +572,24 @@ fn get_next_table(table_level: TableLevel) -> Option<TableLevel> {
 ///
 /// # Returns
 ///
-/// The physical address.
-fn get_phys_addr_from_descriptor(table_level: TableLevel, desc: usize, desc_high: usize) -> usize {
-  assert_eq!(desc_high & ADDR_MASK_HIGH_LONG, 0);
+/// The physical address, or None if the descriptor is invalid.
+fn get_phys_addr_from_descriptor(
+  table_level: TableLevel,
+  desc: usize,
+  desc_high: usize,
+) -> Option<usize> {
+  if desc_high & ADDR_MASK_HIGH_MASK_LONG != 0 {
+    return None;
+  }
 
-  match table_level {
-    TableLevel::Level1 => desc & LEVEL_1_ADDR_MASK_LONG,
-    TableLevel::Level2 => desc & LEVEL_2_ADDR_MASK_LONG,
-    TableLevel::Level3 => desc & LEVEL_3_ADDR_MASK_LONG,
+  match desc & TYPE_MASK {
+    MM_PAGE_TABLE_FLAG_LONG => Some(desc & TABLE_OR_PAGE_LOW_MASK_LONG),
+    MM_BLOCK_FLAG_LONG => match table_level {
+      TableLevel::Level1 => Some(desc & LEVEL_1_BLOCK_LOW_MASK_LONG),
+      TableLevel::Level2 => Some(desc & LEVEL_2_BLOCK_LOW_MASK_LONG),
+      _ => None,
+    },
+    _ => None,
   }
 }
 
@@ -606,7 +608,8 @@ fn get_phys_addr_from_descriptor(table_level: TableLevel, desc: usize, desc_high
 ///
 /// # Returns
 ///
-/// A tuple with the low and high 32-bits of the descriptor.
+/// A tuple with the low and high 32-bits of the descriptor, or None if it is
+/// not possible to make a descriptor.
 fn make_descriptor(
   table_level: TableLevel,
   phys_addr: usize,
@@ -618,16 +621,16 @@ fn make_descriptor(
     MM_NORMAL_MAIR_IDX_LONG
   };
 
-  let phys_addr = match table_level {
-    TableLevel::Level1 => phys_addr & LEVEL_1_ADDR_MASK_LONG,
-    TableLevel::Level2 => phys_addr & LEVEL_2_ADDR_MASK_LONG,
-    TableLevel::Level3 => phys_addr & LEVEL_3_ADDR_MASK_LONG,
-  };
-
   match table_level {
-    TableLevel::Level2 => Some(make_block_descriptor(phys_addr, mair_idx)),
-    TableLevel::Level3 => Some(make_page_descriptor(phys_addr, mair_idx)),
-    _ => None,
+    TableLevel::Level1 => {
+      Some(make_block_descriptor(phys_addr & LEVEL_1_BLOCK_LOW_MASK_LONG, mair_idx))
+    }
+    TableLevel::Level2 => {
+      Some(make_block_descriptor(phys_addr & LEVEL_2_BLOCK_LOW_MASK_LONG, mair_idx))
+    }
+    TableLevel::Level3 => {
+      Some(make_page_descriptor(phys_addr & TABLE_OR_PAGE_LOW_MASK_LONG, mair_idx))
+    }
   }
 }
 
@@ -680,8 +683,8 @@ fn make_page_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
 /// True if the descriptor is a page table pointer, false otherwise.
 fn is_pointer_entry(table_level: TableLevel, desc: usize, _desc_high: usize) -> bool {
   match table_level {
-    TableLevel::Level1 | TableLevel::Level2 => desc & TYPE_MASK == MM_PAGE_TABLE_FLAG_LONG,
-    _ => false,
+    TableLevel::Level3 => false,
+    _ => desc & TYPE_MASK == MM_PAGE_TABLE_FLAG_LONG,
   }
 }
 
@@ -697,14 +700,16 @@ fn is_pointer_entry(table_level: TableLevel, desc: usize, _desc_high: usize) -> 
 /// A tuple with the low and high 32-bits of the descriptor, or None if the
 /// table level is invalid.
 fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<(usize, usize)> {
-  assert!(bits::is_aligned(phys_addr, super::get_page_size()));
+  match table_level {
+    TableLevel::Level3 => None,
+    _ => {
+      if !bits::is_aligned(phys_addr, super::get_page_size()) {
+        return None;
+      }
 
-  // Level 3 tables cannot have pointer entries.
-  if table_level == TableLevel::Level3 {
-    return None;
+      Some((phys_addr | MM_PAGE_TABLE_FLAG_LONG, 0))
+    }
   }
-
-  Some((phys_addr | MM_PAGE_TABLE_FLAG_LONG, 0))
 }
 
 /// Get the descriptor index for a virtual address in the specified table.
@@ -793,7 +798,7 @@ fn alloc_table_and_fill(
   strategy: MappingStrategy,
 ) -> (usize, usize) {
   let next_level = get_next_table(table_level).unwrap();
-  let mut next_addr = get_phys_addr_from_descriptor(table_level, desc, desc_high);
+  let mut next_addr = get_phys_addr_from_descriptor(table_level, desc, desc_high).unwrap();
   let mut desc = desc;
   let mut desc_high = desc_high;
 

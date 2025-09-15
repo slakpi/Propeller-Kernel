@@ -249,7 +249,8 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 ///
 /// # Description
 ///
-/// Linearly maps the low memory area into the kernel page tables.
+/// Linearly maps the low memory area into the kernel page tables. Invalidating
+/// the TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
   let mem_config = get_memory_config();
 
@@ -273,6 +274,4 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
-
-  todo!("Invalidate caches")
 }

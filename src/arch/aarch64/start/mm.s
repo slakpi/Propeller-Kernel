@@ -5,26 +5,26 @@
 // Page descriptor flags. See D8.3.2. Note: Bits 58:55 are reserved for
 // software use. Bit 6 is zero to deny access to EL0. Memory is RW if bit 7 is
 // 0, RO otherwise.
-.equ MM_TYPE_PAGE_TABLE, 0x3
-.equ MM_TYPE_PAGE,       0x3
-.equ MM_TYPE_BLOCK,      0x1
-.equ MM_ACCESS_FLAG,     (1 << 10)
+.equ MM_TYPE_PAGE_TABLE, 0b11
+.equ MM_TYPE_PAGE,       0b11
+.equ MM_TYPE_BLOCK,      0b01
+.equ MM_ACCESS_FLAG,     (0b1 << 10)
 .equ MM_ACCESS_RW,       (0b00 << 6)
 .equ MM_ACCESS_RO,       (0b10 << 6)
 
-/// 2 MiB section virtual address layout:
-///
-///   +---------------+--------+--------+--------+--------------------+
-///   | / / / / / / / |   L1   |   L2   |   L3   |       Offset       |
-///   +---------------+--------+--------+--------+--------------------+
-///   63             48       39       30       21                    0
-///
-/// 4 KiB page virtual address layout:
-///
-///   +---------------+--------+--------+--------+--------+-----------+
-///   | / / / / / / / |   L1   |   L2   |   L3   |   L4   |  Offset   |
-///   +---------------+--------+--------+--------+--------+-----------+
-///   63             48       39       30       21       12           0
+// 2 MiB section virtual address layout:
+//
+//   +---------------+--------+--------+--------+--------------------+
+//   | / / / / / / / |   L1   |   L2   |   L3   |       Offset       |
+//   +---------------+--------+--------+--------+--------------------+
+//   63             48       39       30       21                    0
+//
+// 4 KiB page virtual address layout:
+//
+//   +---------------+--------+--------+--------+--------+-----------+
+//   | / / / / / / / |   L1   |   L2   |   L3   |   L4   |  Offset   |
+//   +---------------+--------+--------+--------+--------+-----------+
+//   63             48       39       30       21       12           0
 .equ PAGE_SHIFT,      12
 .equ TABLE_SHIFT,     9
 .equ TABLE_ENTRY_CNT, (1 << TABLE_SHIFT)
@@ -45,11 +45,24 @@
 // The kernel address space will span the 256 TiB from 0xffff_0000_0000_000 to
 // 0xffff_ffff_ffff_ffff while the user address space will span the 256 TiB
 // from 0x0000_0000_0000_0000 to 0x0000_ffff_ffff_ffff.
+//
+// TCR_EL1.IRGN1/0 and TCR_EL1.ORGN1/0 control the inner/outer cacheability for
+// memory associated with the page tables expected in TTBR1/0_EL1. These tell
+// the MMU whether to use the cache or read memory, so they MUST match the
+// cacheability attributes referenced in MAIR_EL1. But default, no cacheing is
+// assumed and the MMU will read directly from memory. Configure the MMU to
+// expect normal write-back, write-allocate for both the inner and outer
+// regions in TTBR1_EL1 and TTBR0_EL1.
 .equ TCR_EL1_T0SZ,   16
 .equ TCR_EL1_T1SZ,   (TCR_EL1_T0SZ << 16)
 .equ TCR_EL1_TG0_4K, (0 << 14)
 .equ TCR_EL1_TG1_4K, (2 << 30)
-.equ TCR_EL1_VALUE,  (TCR_EL1_T0SZ | TCR_EL1_T1SZ | TCR_EL1_TG0_4K | TCR_EL1_TG1_4K)
+.equ TCR_EL1_IRGN1,  (0b01 << 24)
+.equ TCR_EL1_IRGN0,  (0b01 << 8)
+.equ TCR_EL1_ORGN1,  (0b01 << 26)
+.equ TCR_EL1_ORGN0,  (0b01 << 10)
+.equ TCR_EL1_CACHE,  (TCR_EL1_IRGN1 | TCR_EL1_IRGN0 | TCR_EL1_ORGN1 | TCR_EL1_ORGN0)
+.equ TCR_EL1_VALUE,  (TCR_EL1_T0SZ | TCR_EL1_T1SZ | TCR_EL1_TG0_4K | TCR_EL1_TG1_4K | TCR_EL1_CACHE)
 
 // EL1 memory attribute indirection register configuration. See D17.2.97.
 //
@@ -259,13 +272,13 @@ section_align_block:
 // Section align the end address.
   add     x9, x9, x1
   mvn     x1, x1
-  and     x2, x2, x1
+  and     x9, x9, x1
 
 // Section align the base address.
   and     x0, x0, x1
 
 // Calculate the new size.
-  sub     x1, x2, x0
+  sub     x1, x9, x0
 
   ret
 

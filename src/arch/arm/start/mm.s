@@ -2,19 +2,19 @@
 
 .include "abi.h"
 
-/// TTBCR value. See B4.1.153 and B3.6.4. A value of 0 for TTBCR.A1 tells the
-/// MMU that TTBR0 defines address space IDs. TTBCR.EAE enable extended address
-/// extensions for long page descriptors. TTBCR.T0SZ is 0 to let the user
-/// segment fill the virtual addresses not used by the kernel segment.
-/// TTBCR.T1SZ is either 1 for a 2/2 split or 2 for a 3/1 split.
-///
-/// TTBCR.IRGN1/0 and TTBCR.ORGN1/0 control the inner/outer cacheability for
-/// memory associated with the page tables expected in TTBR1/0. These tell the
-/// MMU whether to use the cache or read memory, so they MUST match the
-/// cacheability attributes referenced in MAIR. But default, no cacheing is
-/// assumed and the MMU will read directly from memory. Configure the MMU to
-/// expect normal write-back, write-allocate for both the inner and outer
-/// regions in TTBR1 and TTBR0.
+// TTBCR value. See B4.1.153 and B3.6.4. A value of 0 for TTBCR.A1 tells the
+// MMU that TTBR0 defines address space IDs. TTBCR.EAE enable extended address
+// extensions for long page descriptors. TTBCR.T0SZ is 0 to let the user
+// segment fill the virtual addresses not used by the kernel segment.
+// TTBCR.T1SZ is either 1 for a 2/2 split or 2 for a 3/1 split.
+//
+// TTBCR.IRGN1/0 and TTBCR.ORGN1/0 control the inner/outer cacheability for
+// memory associated with the page tables expected in TTBR1/0. These tell the
+// MMU whether to use the cache or read memory, so they MUST match the
+// cacheability attributes referenced in MAIR. But default, no cacheing is
+// assumed and the MMU will read directly from memory. Configure the MMU to
+// expect normal write-back, write-allocate for both the inner and outer
+// regions in TTBR1 and TTBR0.
 .equ TTBCR_EAE,    (0x1 << 31)
 .equ TTBCR_A1,     (0x0 << 22)
 .equ TTBCR_T1SZ_2, (0x1 << 16)
@@ -24,7 +24,8 @@
 .equ TTBCR_IRGN0,  (0b01 << 8)
 .equ TTBCR_ORGN1,  (0b01 << 26)
 .equ TTBCR_ORGN0,  (0b01 << 10)
-.equ TTBCR_VALUE,  (TTBCR_EAE | TTBCR_A1 | TTBCR_T0SZ | TTBCR_IRGN1 | TTBCR_IRGN0 | TTBCR_ORGN1 | TTBCR_ORGN0)
+.equ TTBCR_CACHE,  (TTBCR_IRGN1 | TTBCR_IRGN0 | TTBCR_ORGN1 | TTBCR_ORGN0)
+.equ TTBCR_VALUE,  (TTBCR_EAE | TTBCR_A1 | TTBCR_T0SZ | TTBCR_CACHE)
 
 // SCTLR flags. See B4.1.130. Enable the MMU, expect exception vectors at the
 // high address (0xffff_0000), enable the Access Flag, enable data caching.
@@ -38,13 +39,13 @@
 // permissions are checked).
 .equ DACR_VALUE, 0b1
 
-/// Page descriptor flags. See B3.6.1, B3.6.2, and B4.1.104.
-.equ MM_TYPE_PAGE_TABLE, 0x3
-.equ MM_TYPE_PAGE,       0x3
-.equ MM_TYPE_BLOCK,      0x1
-.equ MM_ACCESS_FLAG,     (0x1 << 10)
-.equ MM_ACCESS_RW,       (0x0 << 6)
-.equ MM_ACCESS_RO,       (0x2 << 6)
+// Page descriptor flags. See B3.6.1, B3.6.2, and B4.1.104.
+.equ MM_TYPE_PAGE_TABLE, 0b11
+.equ MM_TYPE_PAGE,       0b11
+.equ MM_TYPE_BLOCK,      0b01
+.equ MM_ACCESS_FLAG,     (0b1 << 10)
+.equ MM_ACCESS_RW,       (0b00 << 6)
+.equ MM_ACCESS_RO,       (0b10 << 6)
 
 // Memory attribute indirection register configuration. See B4.1.104.
 //
@@ -69,19 +70,19 @@
 .equ VEC_L2_OFFSET, 0xff8
 .equ VEC_L3_OFFSET, 0xf80
 
-/// 2 MiB section virtual address layout:
-///
-///   +----+--------+--------------------+
-///   | L1 |   L2   |       Offset       |
-///   +----+--------+--------------------+
-///   31  30       21                    0
-///
-/// 4 KiB page virtual address layout:
-///
-///   +----+--------+--------+-----------+
-///   | L1 |   L2   |   L3   |  Offset   |
-///   +----+--------+--------+-----------+
-///   31  30       21       12           0
+// 2 MiB section virtual address layout:
+//
+//   +----+--------+--------------------+
+//   | L1 |   L2   |       Offset       |
+//   +----+--------+--------------------+
+//   31  30       21                    0
+//
+// 4 KiB page virtual address layout:
+//
+//   +----+--------+--------+-----------+
+//   | L1 |   L2   |   L3   |  Offset   |
+//   +----+--------+--------+-----------+
+//   31  30       21       12           0
 .equ PAGE_SHIFT,         12
 .equ L1_TABLE_SHIFT,     2
 .equ L2_TABLE_SHIFT,     9
@@ -335,27 +336,6 @@ mmu_update_table_entry_local:
 // in B3.18.7 and BPIMVA in B3.18.6), and ensure completion.
   mcr     p15, 0, r1, c8, c7, 1
   mcr     p15, 0, r1, c7, c5, 7
-  dsb
-  isb
-
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// Invalidate caches after translation table update.
-///
-/// # Description
-///
-/// This function fully invalidates the TLB and Branch Predictors, and is
-/// appropriate for mass changes such as swapping a task's translation tables
-/// into TTBR0 or a large change to the kernel's translation tables.
-.global mmu_invalidate_caches
-mmu_invalidate_caches:
-// See TLBIALL in B3.18.7 and BPIALL in B3.18.6
-  mov     r0, #0
-  mcr     p15, 0, r0, c8, c7, 0
-  mcr     p15, 0, r0, c7, c5, 6
   dsb
   isb
 
