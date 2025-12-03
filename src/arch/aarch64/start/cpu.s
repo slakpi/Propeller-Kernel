@@ -1,5 +1,7 @@
 //! AArch64 Low-Level CPU Utilities
 
+.equ CPU_AFFINITY_MASK, 0x000000ff00ffffff
+
 ///-----------------------------------------------------------------------------
 ///
 /// Halt the caller.
@@ -20,5 +22,6 @@ cpu_halt:
 .global cpu_get_id
 cpu_get_id:
   mrs     x0, mpidr_el1
-  and     x0, x0, #0xff
+  ldr     x1, =CPU_AFFINITY_MASK
+  and     x0, x0, x1
   ret

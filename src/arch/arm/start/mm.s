@@ -67,8 +67,9 @@
 .equ MMU_DEVICE_RO_FLAGS, (MM_ACCESS_RO | (MT_DEVICE_IDX << 2) | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RW_FLAGS, (MM_ACCESS_RW | (MT_DEVICE_IDX << 2) | MM_ACCESS_FLAG)
 
-.equ VEC_L2_OFFSET, 0xff8
-.equ VEC_L3_OFFSET, 0xf80
+.equ RECURSIVE_L2_OFFSET, 0xff0
+.equ VECTORS_L2_OFFSET,   0xff8
+.equ VECTORS_L3_OFFSET,   0xf80
 
 // 2 MiB section virtual address layout:
 //
@@ -168,6 +169,15 @@ mmu_create_kernel_page_tables:
 1:
   mov     r9, r0            // Save the lower L2 table address
   mov     r10, r1           // Save the upper L2 table address
+
+// Setup recursive mapping using entry 510 in the upper L2 table.
+//
+//   NOTE: The flag for a page table entry is the same as the flag for a page
+//         entry to allow recursion.
+  ldr     r0, =RECURSIVE_L2_OFFSET
+  ldr     r1, =MMU_NORMAL_RW_FLAGS | MM_TYPE_PAGE_TABLE
+  orr     r1, r10, r1
+  str     r1, [r10, r0]
 
 // Map the vectors into the kernel page tables.
   mov     r0, r10
@@ -404,7 +414,7 @@ map_vectors:
   orr     r2, r2, #MM_TYPE_PAGE_TABLE
 
 // Entry 511 in the L2 table covers the last 2 MiB of the address space.
-  ldr     r3, =VEC_L2_OFFSET
+  ldr     r3, =VECTORS_L2_OFFSET
   add     r3, r0, r3
   str     r2, [r3], #4
   mov     r2, #0
@@ -412,7 +422,7 @@ map_vectors:
 
 // r3 now points to the L3 table and entry 496 covers the page at 0xffff_0000.
   mov     r0, r3
-  ldr     r3, =VEC_L3_OFFSET
+  ldr     r3, =VECTORS_L3_OFFSET
   add     r3, r0, r3
 
 // Make the descriptor for the vectors.

@@ -58,17 +58,17 @@ where
     usize::try_from(idx).unwrap()
   }
 
-  /// Construct a new HashMap with a Hasher factory.
+  /// Construct a new HashMap.
   ///
   /// # Parameters
   ///
-  /// `builder` - A factory to use for constructing hasher objects.
+  /// * `hasher_factory` - A factory to use for constructing hasher objects.
   ///
   /// # Returns
   ///
   /// A new, empty HashMap.
-  pub fn with_hasher_factory(hasher_factory: S) -> Self {
-    HashMap {
+  pub const fn new(hasher_factory: S) -> Self {
+    Self {
       map: [Self::TABLE_INITIALIZER; N],
       hasher_factory,
     }

@@ -1,11 +1,17 @@
 //! AArch64 Task Management
 
+use super::cpu;
+
 unsafe extern "C" {
   fn task_get_current_task_addr() -> usize;
   fn task_set_current_task_addr(task: usize);
 }
 
-/// AArch64 CPU register context.
+const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + usize::BITS as usize - 1) / usize::BITS as usize;
+
+pub type AffinityMask = [usize; CPU_MASK_WORDS];
+
+/// AArch64 task context.
 ///
 ///   TODO: Add floating-point registers for user tasks.
 pub struct TaskContext {
@@ -25,7 +31,7 @@ pub struct TaskContext {
 }
 
 impl TaskContext {
-  /// Construct a zeroed task context.
+  /// Construct a new task context.
   pub const fn new() -> Self {
     TaskContext {
       x19: 0,
@@ -43,49 +49,51 @@ impl TaskContext {
       sp: 0,
     }
   }
+
+  /// Get the current pin mask.
+  pub fn get_pin_mask(&self) -> Option<AffinityMask> {
+    None
+  }
+
+  /// See `Task::map_page()`.
+  ///
+  /// # Parameters
+  ///
+  /// * `page_addr` - The physical address of the page to map.
+  ///
+  /// # Description
+  ///
+  ///   NOTE: This function exists to satisfy the TaskContext interface
+  ///         requirements and simply adds the physical page address to the
+  ///         virtual base under the assumption that all physical memory has
+  ///         been linearly mapped into the kernel's virtual address space.
+  ///
+  /// # Returns
+  ///
+  /// The virtual address of the mapped page.
+  pub fn map_page(&mut self, page_addr: usize) -> usize {
+    super::get_kernel_config().virtual_base + page_addr
+  }
+
+  /// See `Task::unmap_page()`.
+  ///
+  /// # Description
+  ///
+  ///   NOTE: This function exists to satisfy the TaskContext interface
+  ///         requirements and does nothing.
+  pub fn unmap_page(&mut self) {}
 }
 
-/// Get the current task address.
+/// Get the current task address from the task register.
 pub fn get_current_task_addr() -> usize {
   unsafe { task_get_current_task_addr() }
 }
 
-/// Set the current task address.
-pub fn set_current_task_addr(task: usize) {
-  unsafe { task_set_current_task_addr(task) };
-}
-
-/// Maps a page into the kernel's virtual address space.
+/// Set the task register to a new task object address.
 ///
 /// # Parameters
 ///
-/// * `context` - The task's context.
-/// * `page_addr` - The physical address of the page to map.
-/// * `device` - Whether this page maps to device memory.
-///
-/// # Description
-///
-///   NOTE: This function exists to satisfy the Task interface requirements and
-///         simply adds the physical page address to the virtual base under the
-///         assumption that all physical memory has been linearly mapped into
-///         the kernel's virtual address space.
-///
-/// # Returns
-///
-/// The virtual address of the mapped page.
-pub fn map_page_local(_context: &mut TaskContext, page_addr: usize, _device: bool) -> usize {
-  super::get_kernel_config().virtual_base + page_addr
+/// * `addr` - The new task address.
+pub fn set_current_task_addr(addr: usize) {
+  unsafe { task_set_current_task_addr(addr) }
 }
-
-/// Unmaps the previously mapped page in the current task's local mapping
-/// table.
-///
-/// # Parameters
-///
-/// * `context` - The task's context.
-///
-/// # Description
-///
-///   NOTE: This function exists to satisfy the Task interface requirements and
-///         does nothing.
-pub fn unmap_page_local(_context: &mut TaskContext) {}

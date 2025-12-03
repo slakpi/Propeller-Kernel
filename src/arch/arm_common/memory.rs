@@ -52,7 +52,7 @@ impl<'mem> DtbMemoryScanner<'mem> {
   ///
   /// A new string map for the expected properties and values.
   fn build_string_map() -> StringMap<'mem> {
-    let mut string_map = StringMap::with_hasher_factory(hash::BuildFnv1aHasher {});
+    let mut string_map = StringMap::new(hash::BuildFnv1aHasher {});
 
     string_map.insert("#address-cells".as_bytes(), StringTag::DtbPropAddressCells);
     string_map.insert("#size-cells".as_bytes(), StringTag::DtbPropSizeCells);

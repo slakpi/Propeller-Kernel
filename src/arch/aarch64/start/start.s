@@ -37,13 +37,18 @@
 ///
 /// # Parameters
 ///
-/// * w0 - 32-bit pointer to the ATAG/DTB blob (primary core)
+/// * w0 - 32-bit pointer to the ATAG/DTB blob
 /// * x1 - Zero
 /// * x2 - Zero
 /// * x3 - Zero
-/// * x4 - Address of this entry point.
+/// * x4 - Address of this entry point
 ///
 /// # Description
+///
+///   NOTE: The Linux boot protocol requires that any secondary cores be parked.
+///         We can assume here that we are running on the primary core and that
+///         the primary core is configured as required by the boot protocol
+///         (interrupts off, MMU off, etc.).
 ///
 ///   NOTE: The Linux AArch64 boot protocol requires the bootloader to leave the
 ///         primary core in either EL2 or EL1. EL2 is preferred if the core
@@ -65,21 +70,50 @@ _start:
   mrs     x9, CurrentEL
   lsr     x9, x9, #2        // Bits 3:2 are the exception level
 
+// Initialize EL3, EL2, and EL1
   cmp     x9, #3
-  beq     el3_entry         // Initialize EL3, EL2, and EL1
-  cmp     x9, #2
-  beq     el2_entry         // Initialize EL2 and EL1
-  cmp     x9, #1
-  beq     el1_entry         // Initialize EL1
+  beq     el3_entry
 
-  b       cpu_halt          // Unknown state
+// Initialize EL2 and EL1
+  cmp     x9, #2
+  beq     el2_entry
+
+// Initialize EL1
+  cmp     x9, #1
+  beq     el1_entry
+
+  b       cpu_halt          // Unexpected state
 
 
 .section ".text"
 
 ///-----------------------------------------------------------------------------
 ///
-/// Entry point for EL3.
+/// Kernel entry point on a secondary core.
+.global _secondary_start
+_secondary_start:
+// Initialize the exception levels as needed to get to EL1.
+  mrs     x9, CurrentEL
+  lsr     x9, x9, #2        // Bits 3:2 are the exception level
+
+// Initialize EL3, EL2, and EL1
+  cmp     x9, #3
+  beq     secondary_el3_entry
+
+// Initialize EL2 and EL1
+  cmp     x9, #2
+  beq     secondary_el2_entry
+
+// Initialize EL1
+  cmp     x9, #1
+  beq     secondary_el1_entry
+
+  b       cpu_halt          // Unexpected state
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for EL3 on the primary core.
 el3_entry:
   ldr     x9, =SCR_EL3_DEFAULT
   msr     scr_el3, x9
@@ -95,7 +129,7 @@ el3_entry:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Entry point for EL2.
+/// Entry point for EL2 on the primary core.
 el2_entry:
   ldr     x9, =HCR_EL2_DEFAULT
   msr     hcr_el2, x9
@@ -111,13 +145,53 @@ el2_entry:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Entry point for EL1.
+/// Entry point for EL1 on the primary core.
 el1_entry:
   ldr     x9, =SCTLR_EL1_DEFAULT
   msr     sctlr_el1, x9
 
-  bl      cpu_get_id        // Get the core ID; core 0 is the primary core.
-  cbz     x0, primary_core_boot
+  b       primary_core_boot
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for EL3 on a secondary core.
+secondary_el3_entry:
+  ldr     x9, =SCR_EL3_DEFAULT
+  msr     scr_el3, x9
+
+  ldr     x9, =SPSR_EL3_DEFAULT
+  msr     spsr_el3, x9
+
+  adr     x9, secondary_el2_entry
+  msr     elr_el3, x9
+
+  eret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for EL2 on a secondary core.
+secondary_el2_entry:
+  ldr     x9, =HCR_EL2_DEFAULT
+  msr     hcr_el2, x9
+
+  ldr     x9, =SPSR_EL2_DEFAULT
+  msr     spsr_el2, x9
+
+  adr     x9, secondary_el1_entry
+  msr     elr_el2, x9
+
+  eret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for EL1 on a secondary core.
+secondary_el1_entry:
+  ldr     x9, =SCTLR_EL1_DEFAULT
+  msr     sctlr_el1, x9
+
   b       secondary_core_boot
 
 

@@ -5,12 +5,18 @@ mod mm;
 
 pub mod task;
 
-use crate::arch::{cpu, memory};
+use crate::arch::{cpu, memory, task::TaskContext};
 use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
 use crate::support::{bits, dtb, range};
+use crate::task::Task;
 use core::ptr;
 
-/// Propeller requires 4 KiB pages.
+unsafe extern "C" {
+  fn _secondary_start();
+}
+
+/// Propeller requires 4 KiB pages and uses 2 MiB seconds at Level 3. All page
+/// table entries are 8 bytes.
 const PAGE_SIZE: usize = 4096;
 
 const PAGE_SHIFT: usize = 12;
@@ -22,6 +28,10 @@ const SECTION_SIZE: usize = 2 * 1024 * 1024;
 const SECTION_SHIFT: usize = 21;
 
 const SECTION_MASK: usize = SECTION_SIZE - 1;
+
+const PAGE_TABLE_ENTRY_SIZE: usize = 8;
+
+const PAGE_TABLE_ENTRY_SHIFT: usize = 3;
 
 /// The size of the virtual area reserved for the page directory (2 TiB).
 const PAGE_DIRECTORY_SIZE: usize = 0x200_0000_0000;
@@ -64,10 +74,14 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 };
 
 /// CPU core configuration.
-static mut CORE_CONFIG: cpu::CoreConfig = [cpu::Core::new(); cpu::MAX_CORES];
+static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
 
 /// Memory layout configuration.
 static mut MEMORY_CONFIG: memory::MemoryConfig = memory::MemoryConfig::new();
+
+/// Bootstrap task to ensure a valid task object is in the task register to
+/// satisfy the thread-local mapping interface. This task is effectively unused.
+static mut BOOTSTRAP_TASK: Task = Task::new(0, TaskContext::new());
 
 /// AArch64 platform configuration.
 ///
@@ -116,6 +130,7 @@ pub fn init(config_addr: usize) {
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map();
+  init_bootstrap_task();
 }
 
 /// Get the size of a page.
@@ -148,14 +163,14 @@ pub const fn get_section_mask() -> usize {
   SECTION_MASK
 }
 
-/// Get the number of cores.
-///
-/// # Description
-///
-///   NOTE: The interface guarantees read-only access outside of the module and
-///         one-time initialization is assumed.
-pub fn get_core_count() -> usize {
-  unsafe { get_core_config().len() }
+/// Get the size of page table entry.
+pub const fn get_page_table_entry_size() -> usize {
+  PAGE_TABLE_ENTRY_SIZE
+}
+
+/// Get the page table entry shift.
+pub const fn get_page_table_entry_shift() -> usize {
+  PAGE_TABLE_ENTRY_SHIFT
 }
 
 /// Get the full core configuration.
@@ -274,4 +289,20 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
+}
+
+/// Initialize the bootstrap task.
+///
+/// # Description
+///
+/// There is no need to go through the normal context switch process. The
+/// bootstrap task is technically already "running." We only need to set the
+/// running task pointer on the primary core
+///
+/// # Assumptions
+///
+/// Assumes the caller is running on the primary core.
+fn init_bootstrap_task() {
+  let task = unsafe { ptr::addr_of_mut!(BOOTSTRAP_TASK).as_mut().unwrap() };
+  Task::set_current_task(task);
 }

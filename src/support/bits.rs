@@ -121,3 +121,27 @@ pub fn xor_checksum(words: &[usize]) -> usize {
 
   sum
 }
+
+/// Set a bit in a multi-word mask.
+///
+/// # Parameters
+///
+/// * `mask` - The mask.
+/// * `bit` - The bit to set.
+pub fn set_bit(mask: &mut [usize], bit: usize) {
+  let word = bit / usize::BITS as usize;
+  let shift = bit % usize::BITS as usize;
+  mask[word] |= 1 << shift;
+}
+
+/// Clear a bit in a multi-word mask.
+///
+/// # Parameters
+///
+/// * `mask` - The mask.
+/// * `bit` - The bit to clear.
+pub fn clear_bit(mask: &mut [usize], bit: usize) {
+  let word = bit / usize::BITS as usize;
+  let shift = bit % usize::BITS as usize;
+  mask[word] &= !(1 << shift);
+}

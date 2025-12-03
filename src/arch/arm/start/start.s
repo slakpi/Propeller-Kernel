@@ -25,9 +25,14 @@
 ///
 /// * r0 - Zero
 /// * r1 - Machine ID
-/// * r2 - Pointer to the ATAG/DTB blob (primary core)
+/// * r2 - Pointer to the ATAG/DTB blob
 ///
 /// # Description
+///
+///   NOTE: The Linux boot protocol requires that any secondary cores be parked.
+///         We can assume here that we are running on the primary core and that
+///         the primary core is configured as required by the boot protocol
+///         (interrupts off, MMU off, etc.).
 ///
 ///   NOTE: The Linux boot protocol for ARM specifies that the bootloader may
 ///         leave the primary core in either hypervisor or supervisor mode.
@@ -46,28 +51,60 @@ _start:
   cmp     r0, #0
   bne     1b
 
-// Initialize the kernel modes as necessary to get to SVC mode.
+// Ensure the core is in SVC mode.
   mov     r0, #ARM_MODE_MASK
   mrs     r1, cpsr          // Read the CPSR.
   and     r0, r0, r1        // Get the mode bits.
 
+// Initialize HYP and SVC mode
   cmp     r0, #ARM_HYP_MODE
-  beq     hyp_entry         // Initialize HYP and SVC mode
-  cmp     r0, #ARM_SVC_MODE
-  beq     svc_entry         // Initialize SVC mode
+  beq     hyp_entry
 
-  b       cpu_halt          // Unknown state
+// Initialize SVC mode
+  cmp     r0, #ARM_SVC_MODE
+  beq     primary_core_boot
+
+// Halt if in unexpected state
+  b       cpu_halt
 
 
 .section ".text"
 
 ///-----------------------------------------------------------------------------
 ///
-/// Entry point for HYP.
+/// Kernel entry point on a secondary core.
+///
+/// # Description
+///
+///   NOTE: The Linux boot protocol for ARM specifies that the bootloader may
+///         leave the primary core in either hypervisor or supervisor mode.
+///         Hypervisor mode is preferred if the core support virtualization.
+.global _secondary_start
+_secondary_start:
+// Ensure the core is in SVC mode.
+  mov     r0, #ARM_MODE_MASK
+  mrs     r1, cpsr          // Read the CPSR.
+  and     r0, r0, r1        // Get the mode bits.
+
+// Initialize HYP and SVC mode
+  cmp     r0, #ARM_HYP_MODE
+  beq     secondary_hyp_entry
+
+// Initialize SVC mode
+  cmp     r0, #ARM_SVC_MODE
+  beq     secondary_core_boot
+
+// Halt if in unexpected state
+  b       cpu_halt
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for HYP on the primary core.
 hyp_entry:
 // Set the exception return address in ELR_hyp.
-  adr     r0, svc_entry_rel
-  ldr     r1, svc_entry_rel
+  adr     r0, primary_core_boot_rel
+  ldr     r1, primary_core_boot_rel
   add     r0, r0, r1
   msr     elr_hyp, r0
 
@@ -80,12 +117,19 @@ hyp_entry:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Entry point for SVC.
-svc_entry:
-  bl      cpu_get_id        // Get the core ID; core 0 is the primary core.
-  cmp     r0, #0
-  beq     primary_core_boot
-  b       secondary_core_boot
+/// Entry point for HYP on a secondary core.
+secondary_hyp_entry:
+// Set the exception return address in ELR_hyp.
+  adr     r0, secondary_core_boot_rel
+  ldr     r1, secondary_core_boot_rel
+  add     r0, r0, r1
+  msr     elr_hyp, r0
+
+// Set the exception return mode to SVC in SPSR_hyp.
+  mov     r0, #SPSR_HYP_DEFAULT
+  msr     spsr_hyp, r0
+
+  eret
 
 
 ///-----------------------------------------------------------------------------
@@ -287,5 +331,7 @@ kernel_pages_start_rel:
   .word __kernel_pages_start - kernel_pages_start_rel
 bss_start_rel:
   .word __bss_start - bss_start_rel
-svc_entry_rel:
-  .word svc_entry - svc_entry_rel
+primary_core_boot_rel:
+  .word primary_core_boot - primary_core_boot_rel
+secondary_core_boot_rel:
+  .word secondary_core_boot - secondary_core_boot_rel

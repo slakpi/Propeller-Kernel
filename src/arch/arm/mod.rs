@@ -5,14 +5,18 @@ mod mm;
 
 pub mod task;
 
-use crate::arch::{cpu, memory};
+use crate::arch::{cpu, memory, task::TaskContext};
 use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
 use crate::support::{bits, dtb, range};
 use crate::task::Task;
 use core::ptr;
 
+unsafe extern "C" {
+  fn _secondary_start();
+}
+
 /// Propeller requires LPAE. With LPAE enabled, pages must be 4 KiB and sections
-/// are 2 MiB at Level 2.
+/// are 2 MiB at Level 2. LPAE page table entries are 8 bytes.
 const PAGE_SIZE: usize = 4096;
 
 const PAGE_SHIFT: usize = 12;
@@ -25,11 +29,18 @@ const SECTION_SHIFT: usize = 21;
 
 const SECTION_MASK: usize = SECTION_SIZE - 1;
 
+const PAGE_TABLE_ENTRY_SIZE: usize = 8;
+
+const PAGE_TABLE_ENTRY_SHIFT: usize = 3;
+
 /// Reserve the upper 128 MiB of the kernel segment for the high memory area.
 const HIGH_MEM_SIZE: usize = 128 * 1024 * 1024;
 
 /// The base virtual address of the exception vectors.
 const VECTORS_VIRTUAL_BASE: usize = 0xffff_0000;
+
+/// The base virtual address of the recursive map area.
+const RECURSIVE_MAP_AREA: usize = 0xffc0_0000;
 
 /// The size of the virtual area reserved for the page directory.
 const PAGE_DIRECTORY_SIZE: usize = 32 * 1024 * 1024;
@@ -74,13 +85,22 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 };
 
 /// CPU core configuration.
-static mut CORE_CONFIG: cpu::CoreConfig = [cpu::Core::new(); cpu::MAX_CORES];
+static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
 
 /// Memory layout configuration.
 static mut MEMORY_CONFIG: memory::MemoryConfig = memory::MemoryConfig::new();
 
 /// The base virtual address of the thread local mapping area.
 static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
+
+/// Helper type to force alignment of the local mapping table. The compiler will
+/// ensure the local mapping table is aligned to a page boundary and rearrange
+/// the remaining fields of the task structure accordingly.
+#[repr(C, align(4096))]
+struct AlignedTable([usize; 1024]);
+
+/// The bootstrap task's local mapping table.
+static mut BOOTSTRAP_LOCAL_TABLE: AlignedTable = AlignedTable([0; 1024]);
 
 /// The bootstrap task is a special task that exists only to provide a way to
 /// manage high memory mappings before the kernel allocators and scheduler are
@@ -89,7 +109,7 @@ static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
 /// Once the kernel maps system memory, initializes the kernel allocators,
 /// initializes the scheduler, and enables the secondary cores, the bootstrap
 /// task will be replaced by the real init thread tasks.
-static mut BOOTSTRAP_TASK: Task = Task::new(0);
+static mut BOOTSTRAP_TASK: Task = Task::new(0, TaskContext::new(0));
 
 /// ARM platform configuration.
 ///
@@ -177,6 +197,16 @@ pub const fn get_section_mask() -> usize {
   SECTION_MASK
 }
 
+/// Get the size of page table entry.
+pub const fn get_page_table_entry_size() -> usize {
+  PAGE_TABLE_ENTRY_SIZE
+}
+
+/// Get the page table entry shift.
+pub const fn get_page_table_entry_shift() -> usize {
+  PAGE_TABLE_ENTRY_SHIFT
+}
+
 /// Get the kernel base address.
 ///
 /// # Description
@@ -197,6 +227,39 @@ pub fn get_kernel_virtual_base() -> usize {
   unsafe { KERNEL_CONFIG.virtual_base }
 }
 
+/// Get the virtual base address of a page table that maps a given virtual
+/// address.
+///
+/// # Parameters
+///
+/// * `virt_addr` - A virtual address in the kernel's address space.
+///
+/// # Description
+///
+/// The Level 2 page table that serves the upper 1 GiB of the kernel's address
+/// space has a recursive mapping to allow editing of itself and any Level 3
+/// table entries.
+///
+///   NOTE: In a 2/2 split, the lower 1 GiB of the kernel's address space will
+///         always contain linear physical memory mappings and will never need
+///         to be modified after boot.
+///
+/// # Returns
+///
+/// The virtual address of the page table that maps a given virtual address or
+/// None if the given virtual address is not in the upper 1 GiB of the kernel's
+/// address space.
+pub fn get_page_virtual_address_for_virtual_address(virt_addr: usize) -> Option<usize> {
+  // Only the upper 1 GiB of the kernel address space is served by the recursive
+  // map area.
+  if virt_addr < 0xc000_0000 {
+    return None;
+  }
+
+  let index = (virt_addr - 0xc000_0000) / SECTION_SIZE;
+  Some(RECURSIVE_MAP_AREA + (index << PAGE_SHIFT))
+}
+
 /// Get the base virtual address of the thread local area for the current core.
 ///
 /// # Description
@@ -204,23 +267,13 @@ pub fn get_kernel_virtual_base() -> usize {
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
 fn get_thread_local_virtual_base() -> usize {
-  let offset = cpu::get_id() * get_section_size();
+  let offset = get_core_config().get_current_core_index() * get_section_size();
   unsafe { THREAD_LOCAL_VIRTUAL_BASE + offset }
 }
 
 /// Get the base physical address of the high memory area.
 fn get_high_mem_base() -> usize {
   usize::MAX - get_kernel_virtual_base() - HIGH_MEM_SIZE + 1
-}
-
-/// Get the number of cores.
-///
-/// # Description
-///
-///   NOTE: The interface guarantees read-only access outside of the module and
-///         one-time initialization is assumed.
-pub fn get_core_count() -> usize {
-  unsafe { get_core_config().len() }
 }
 
 /// Get the full core configuration.
@@ -318,7 +371,7 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 /// the TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
   // Calculate the base of the thread local area.
-  let core_count = get_core_count();
+  let core_count = get_core_config().get_core_count();
   let section_size = get_section_size();
   let thread_local_size = section_size * core_count;
 
@@ -366,7 +419,7 @@ fn init_direct_map() {
 /// # Description
 ///
 /// There is no need to go through the normal context switch process. The
-/// bootstrap task is technically already running. We only need to set the
+/// bootstrap task is technically already "running." We only need to set the
 /// running task pointer on the primary core and map the task's local mapping
 /// table into the kernel page tables.
 ///
@@ -374,16 +427,25 @@ fn init_direct_map() {
 ///
 /// Assumes the caller is running on the primary core.
 pub fn init_bootstrap_task() {
-  let task_ptr = unsafe { ptr::addr_of!(BOOTSTRAP_TASK) };
-  let task = unsafe { task_ptr.as_ref().unwrap() };
-  let table_vaddr = task.get_context().get_local_mapping_table_addr();
-  let table_addr = table_vaddr - get_kernel_virtual_base();
-  let pages_start = get_kernel_config().kernel_pages_start;
+  let task = unsafe { ptr::addr_of_mut!(BOOTSTRAP_TASK).as_mut().unwrap() };
+  let table_vaddr = unsafe { ptr::addr_of!(BOOTSTRAP_LOCAL_TABLE) as usize };
 
-  task::set_current_task_addr(task_ptr as usize);
+  // Setup the bootstrap local mapping table.
+  //
+  // NOTE: The bootstrap task's local mapping table is part of the kernel
+  //       image in low memory. It is safe to just subtract the virtual base
+  //       to get the physical address.
+  let table_addr = table_vaddr - get_kernel_virtual_base();
+  task.get_context_mut().set_table_addr(table_addr);
 
   // Map the task's local mapping table into the kernel address space. The
   // assumption is that the caller is running on the primary core, so the table
   // maps to the beginning of the thread-local area.
-  mm::map_thread_local_table(pages_start, get_thread_local_virtual_base(), table_addr);
+  mm::map_thread_local_table(
+    get_kernel_config().kernel_pages_start,
+    get_thread_local_virtual_base(),
+    table_addr,
+  );
+
+  Task::set_current_task(task);
 }

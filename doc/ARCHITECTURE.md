@@ -37,7 +37,15 @@ Retrieves the page size.
 
 #### `pub fn get_page_shift() -> usize`
 
-Retrieves the number of bits to shift to shift an address right to calculate a physical Page Frame Number (PFN).
+Retrieves the number of bits to shift an address right to calculate a physical Page Frame Number (PFN).
+
+#### `pub fn get_page_table_entry_size() -> usize`
+
+Retrieves the size of a page table entry.
+
+#### `pub fn get_page_table_entry_shift() -> usize`
+
+Retrieves the size of bits to shift an offset right to calculate a page table index.
 
 #### `pub fn get_kernel_base() -> usize`
 
@@ -139,7 +147,7 @@ The stack pointer table is a single page of 1024 4-byte pointer entries. 1024 en
 
 #### Operating Mode
 
-The boot loader will have already put the primary core into SVC or HYP. On startup, Propeller ensures the primary core is in SVC before performing startup tasks.
+The boot loader will have already put the primary core into SVC or HYP. On startup, Propeller ensures the primary core is in SVC before performing startup tasks. If the primary core is in an unexpected mode initially, Propeller halts.
 
 #### Basic Startup
 
@@ -147,8 +155,7 @@ Once in SVC on the primary core, Propeller sets the primary core's `SP_svc` poin
 
 With the stack set, Propeller writes all zeros to the `.bss` section.
 
-Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a
-DeviceTree, Propeller halts.
+Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
 
 #### Initial Page Tables {#arm-initial-page-tables}
 
@@ -216,9 +223,11 @@ After enabling the MMU, the primary core fills out the ARM kernel configuration 
 
 #### CPU Initialization
 
-Something something DTB and bootstrap task.
+Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. `MPIDR` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
 
-ARM builds of Propeller are limited to 16 cores. This is due to address space limitations discussed in the [Address Space](#arm-address-space) section.
+ARM builds of Propeller are limited to [16 cores](#thread-local-area), and will only add the first 16 cores it encounters in the DTB to the core database.
+
+After initializing the core database, Propeller initializes a statically-allocated task structure called the Bootstrap Task and provides the Bootstrap Task with a statically-allocated page table for local mappings. This Bootstrap Task represents the single-thread boot code and allows mapping the High Memory area to setup the allocator data structures before going multi-threaded. Once single-threaded initialization has completed, the Bootstrap Task will be replaced by the real Init Task.
 
 #### Memory Initialization
 
@@ -247,20 +256,24 @@ The split is a balance of available physical memory versus speed. The ARM suppor
 When using a 3/1 split configuration, Propeller creates a Low Memory area with a fixed, linear mapping to the first 896 MiB of physical memory starting at the kernel segment's base address.
 
     +-----------------+ 0xffff_ffff    -+
-    | / / / / / / / / | 56 KiB (Unused) |                  K
-    |.................| 0xffff_2000     |                  E
-    | Exception Stubs | 4 KiB           |                  R
-    |.................| 0xffff_1000     |                  N
+    | / / / / / / / / | 56 KiB          |
+    |.................| 0xffff_2000     |
+    | Exception Stubs | 4 KiB           |
+    |.................| 0xffff_1000     |                  K
     | Vectors         | 4 KiB           |                  E
-    |.................| 0xffff_0000     |                  L 
-    | Page Directory  | 32 MiB          |
-    |.................| 0xfdff_0000     +- High Memory     S
-    | Thread Local    |                 |                  E
-    |.................|                 |                  G
-    | ISR Stacks      |                 |                  M
-    |.................|                 |                  E
-    |                 |                 |                  N
+    |.................| 0xffff_0000     |                  R
+    | / / / / / / / / | 1,984 KiB       |                  N
+    |.................| 0xffe0_0000     |                  E
+    | Recursive Map   | 2 MiB           |                  L
+    |.................| 0xffc0_0000     +- High Memory
+    | Page Directory  | 32 MiB          |                  S
+    |.................| 0xfdc0_0000     |                  E
+    | Thread Local    |                 |                  G
+    |.................|                 |                  M
+    | ISR Stacks      |                 |                  E
+    |.................|                 |                  N
     |                 |                 |                  T
+    | Hardware Area   |                 |
     |                 |                 |
     +-----------------+ 0xf800_0000    -+
     |                 |                 |
@@ -276,7 +289,55 @@ When using a 3/1 split configuration, Propeller creates a Low Memory area with a
     |                 |
     +-----------------+ 0x0000_0000
 
+When using a 2/2 split configuration, Propeller maps the first 1,920 MiB of physical memory starting at the kernel's base address and uses the top 128 MiB in the same manner as a 3/1 split.
+
+##### Exception Vectors and Stubs
+
 Propeller configures ARM cores to place exception vectors at 0xffff_0000 and places the stub pointers in the following page at 0xffff_10000. The top 56 KiB of the address space are unused.
+
+##### Recursive Map Area
+
+The Recursive Map area provides access to the page tables that map the upper 1 GiB of the kernel's address space. With a 3/1 split, this will be all of the kernel's page tables. With a 2/2 split, the page tables that map the lower 1 GiB of the kernel's address space will not be accessible through the Recursive Map area.
+
+Refer to [Recursive Page Tables][recursivemap].
+
+An example Level 2 table that covers the upper 1 GiB of the kernel's address space is setup as follows:
+
+    +----------------------------------+
+    | Level 2 Table 0xaaaa_0000        |
+    +-----+----------------------------+ <----+
+    | 0   | Level 3 Table 0xbbbb_0000  |      |
+    +-----+----------------------------+      |
+    | 1   |                            |      |
+    | ... | Other Mappings             |      |
+    | 509 |                            |      |
+    +-----+----------------------------+      |
+    | 510 | Recursive to 0xaaaa_0000   | -----+
+    +-----+----------------------------+
+    | 511 | Vector Mappings            |
+    +-----+----------------------------+
+
+Entry 510 is a recursive mapping back to the beginning of the Level 2 table and reserves the 2 MiB block at 0xffc0_0000 for page table access. Consider the virtual address 0xffc0_0000:
+
+      11   111111110   000000000   000000000000
+    +----+-----------+-----------+--------------+
+    | L1 |    L2     |    L2     |      L3      |
+    +----+-----------+-----------+--------------+
+    31  30          21          12              0
+
+Bits [31:30] select the Level 2 table that covers the upper 1 GiB as normal. Bits [29:21] have a value of 0x1fe to select entry 510. This means the core jumps back to the *same* Level 2 table, but will *think* it is at a Level 3 table. Bits [20:12] select entry 0, and the core jumps to the Level 3 table at 0xbbbb_0000. The magic is that translations stops there. So, bits [11:0] are now offsets into the Level 3 table.
+
+Consider the virtual address 0xffdf_e000:
+
+      11   111111110   111111110   000000000000
+    +----+-----------+-----------+--------------+
+    | L1 |    L2     |    L2     |      L2      |
+    +----+-----------+-----------+--------------+
+    31  30          21          12              0
+
+After the first recursion, bits [20:12] again select entry 510 in the Level 2 table, the core jumps back to the *same* Level 2 table, and translation stops. Bits [11:0] are now offsets into the same Level 2 table.
+
+##### Page Directory
 
 The 32 MiB Page Directory area is a virtually-contiguous array of page metadata entries. With 4 KiB pages, the 4 GiB address space has 1 Mi pages. 32 MiB allows for 32 bytes of metadata for each page.
 
@@ -285,21 +346,33 @@ Why 32 bytes? Will we need more? Great questions! Anyway...
 Similar to the Linux sparse virtual memory map model, this simplifies conversion from a page metadata address to a page physical address and vice versa. For 4 KiB pages:
 
     Page Frame Number (PFN) = Physical Address >> 12
-    Page Metadata Address   = ( PFN << 5 ) + 0xfdff_0000
+    Page Metadata Address   = ( PFN << 5 ) + 0xfdc0_0000
 
 The process is easily reversed to calculate a page physical address from a page metadata address.
 
-The Thread Local area is reserved for mapping per-thread temporary page mappings to access upper memory beyond the linear mappings. Each task instance has its own level 2 page table that is swapped into the kernel's address space when activating the kernel thread. This allows each thread to temporarily map 2 MiB of pages.
+##### Thread Local Area
 
-Each core is assigned a 2 MiB block within the Thread Local area, Propeller limits ARM builds to 16 cores to ensure the Thread Local area is never larger than 32 MiB. When a task has local mappings, the kernel will pin the task to that core until unamps all of its local mappings. This ensures the task's pointers remain valid across context switches.
+The Thread Local area is reserved for mapping per-thread page tables that map upper memory beyond the linear mappings. Each kernel thread has its own Level 3 page table that is mapped when activating the thread and allows the thread to temporarily map 2 MiB of pages into the Thread Local area.
+
+Each core is assigned a 2 MiB block within the Thread Local area, Propeller limits ARM builds to 16 cores to ensure the Thread Local area is never larger than 32 MiB. When a thread has local mappings, the kernel will pin the task to that core until unmaps all of its local mappings. This ensures the thread's pointers remain valid across context switches.
 
 The Thread Local area is aligned on a 2 MiB boundary
 
+Threads store the physical address of their thread-local table in their context struct. When switching threads, the physical address is mapped to the core's assigned 2 MiB block. Once mapped, the table is accessible for updating through the Recursive Map area. For example: Assume there are 16 cores and the Thread Local area is 32 MiB. The Thread Local area base will be 0xfbc0_0000, and Core 1's 2 MiB block will start at 0xfbe0_0000, or entry 479 (0x1df). After putting the physical address of the thread-local page table into entry 479, the thread-local page table itself can be edited using the addresses [0xffdf_f000, 0xffe0_0000).
+
+      11   111111110   111011111   xxxxxxxxxxxx
+    +----+-----------+-----------+--------------+
+    | L1 |    L2     |    L2     | Thread Local |
+    +----+-----------+-----------+--------------+
+    31  30          21          12              0
+
+##### ISR Stacks
+
 The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 4 stacks per core, a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 768 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
 
-The remaining space in the kernel segment is available for memory-mapping hardware. For example, Propeller currently maps ARM SoC peripherals into this area.
+##### Hardware Area
 
-When using a 2/2 split configuration, Propeller maps the first 1,920 MiB of physical memory starting at the kernel's base address and uses the top 128 MiB in the same manner as a 3/1 split.
+The remaining space in the kernel segment is available for memory-mapping hardware. For example, Propeller currently maps ARM SoC peripherals into this area. With the default ISR stack size of 2 pages, this area will be a minimum of 59 MiB. With only 4 cores and 2-page ISR stacks, it could be as large as 83 MiB.
 
 #### Multi-Core Initialization {#arm-multi-core-init}
 
@@ -343,7 +416,7 @@ The stack pointer table is a single page of 512 8-byte pointer entries. 512 entr
 
 #### Exception Level
 
-The boot loader will have already put the primary core into EL2 or EL1. On startup, Propeller ensures the primary core is in EL1 before performing startup tasks.
+The boot loader will have already put the primary core into EL2 or EL1. On startup, Propeller ensures the primary core is in EL1 before performing startup tasks. If the primary core is in an unexpected mode initially, Propeller ahlts.
 
 #### Basic Startup
 
@@ -351,8 +424,7 @@ Once in EL1 on the primary core, Propeller sets the primary core's stack pointer
 
 With the stack set, Propeller writes all zeros to the `.bss` section.
 
-Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a
-DeviceTree, Propeller halts.
+Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
 
 #### Initial Page Tables {#aarch64-initial-page-tables}
 
@@ -417,6 +489,12 @@ After enabling the MMU, the primary core fills out the AArch64 kernel configurat
     +---------------------------------+ 0
 
 #### CPU Initialization
+
+Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. `MPIDR_EL1` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR_EL1` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
+
+AArch64 builds of Propeller are limited to 256 cores, and will only add the first 256 cores it encounters in the DTB to the core database. Unlike the 16-core limitation on ARM builds, this is an arbitrary limitation. However, increasing it does increase the memory cost of the kernel's data structures.
+
+After initializing the core database, Propeller initializes a statically-allocated task structure called the Bootstrap Task. Unlike ARM builds, the AArch64 Bootstrap Task is simply a placeholder to satisfy thread-local page mapping interface. The Bootstrap Task implementation is structured such that mapping can be optimized by the compiler to an addition and unmapping can be optimized away.
 
 #### Memory Initialization
 
@@ -544,3 +622,4 @@ allocating a block of memory. Currently, the checksum is simply an XOR checksum.
 [linuxmemmodels]: https://lwn.net/Articles/789304/
 [buddyalloc]: https://en.wikipedia.org/wiki/Buddy_memory_allocation
 [linuxhighmem]: https://docs.kernel.org/mm/highmem.html
+[recursivemap]: https://os.phil-opp.com/paging-implementation/#recursive-page-tables

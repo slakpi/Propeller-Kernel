@@ -54,6 +54,9 @@ const MM_DEVICE_MAIR_IDX_LONG: usize = 0x1;
 
 const TYPE_MASK: usize = 0x3;
 
+/// The maximum number of local mappings a task can maintain.
+const MAX_LOCAL_MAPPINGS: usize = super::get_page_size() >> super::get_page_table_entry_shift();
+
 /// Translation table level. LPAE supports up to 3 levels of translation.
 #[derive(Copy, Clone, PartialEq)]
 enum TableLevel {
@@ -68,7 +71,7 @@ enum TableLevel {
 ///
 /// * `virtual_base` - The kernel segment base address.
 /// * `split` - The virtual memory split.
-/// * `pages_start` - The address of the kernel's starting page table.
+/// * `pages_start` - The physical address of the task's starting page table.
 /// * `base` - Base of the physical address range.
 /// * `size` - Size of the physical address range.
 /// * `device` - Whether this block or page maps to device memory.
@@ -79,6 +82,11 @@ enum TableLevel {
 ///
 /// Direct mapping maps a physical address PA to a virtual address VA where
 /// `VA = PA + virtual base`.
+///
+/// # Assumptions
+///
+/// * The physical address of the starting page table is in low memory.
+/// * The allocator *must* allocate pages in low memory.
 pub fn direct_map_memory(
   virtual_base: usize,
   pages_start: usize,
@@ -108,7 +116,7 @@ pub fn direct_map_memory(
 /// # Parameters
 ///
 /// * `virtual_base` - The kernel segment base address.
-/// * `pages_start` - The address of the task's starting page table.
+/// * `pages_start` - The physical address of the task's starting page table.
 /// * `virt` - Base of the virtual address range.
 /// * `base` - Base of the physical address range.
 /// * `size` - Size of the physical address range.
@@ -120,6 +128,11 @@ pub fn direct_map_memory(
 ///
 /// Mapping a physical address PA to a virtual address VA where
 /// `VA = (PA - base) + virt`.
+///
+/// # Assumptions
+///
+/// * The physical address of the starting page table is in low memory.
+/// * The allocator *must* allocate pages in low memory.
 pub fn map_memory(
   virtual_base: usize,
   pages_start: usize,
@@ -143,7 +156,7 @@ pub fn map_memory(
   );
 }
 
-/// Maps a thread-local mapping table into the kernel's address space.
+/// Maps a thread-local table into the kernel's address space.
 ///
 /// # Parameters
 ///
@@ -159,6 +172,10 @@ pub fn map_memory(
 ///
 /// The thread-local mapping table is mapped by adding a table entry to the
 /// Level 2 table.
+///
+/// # Assumptions
+///
+/// The Level 1 and Level 2 page tables are in low memory.
 pub fn map_thread_local_table(pages_start: usize, local_virt: usize, table_addr: usize) {
   let virtual_base = super::get_kernel_virtual_base();
   let start_level = get_first_table_level(virtual_base, local_virt);
@@ -197,10 +214,6 @@ pub fn map_thread_local_table(pages_start: usize, local_virt: usize, table_addr:
 /// Adds the page to the task's local mappings and invalidates the current
 /// core's TLB for the virtual address assigned to the page.
 ///
-/// # Assumptions
-///
-/// Assumes there is room in the table for the mapping.
-///
 /// # Returns
 ///
 /// The virtual address assigned to the page.
@@ -211,9 +224,7 @@ pub fn map_page_local(
   count: usize,
   device: bool,
 ) -> usize {
-  if page_addr < super::get_high_mem_base() {
-    return super::get_kernel_virtual_base() + page_addr;
-  }
+  assert!(count < MAX_LOCAL_MAPPINGS);
 
   let idx = count << 1;
   let page_vaddr = section_vaddr + (count << super::get_page_shift());
@@ -240,13 +251,12 @@ pub fn map_page_local(
 /// Removes the most recently added page from the task's local mappings table
 /// and invalidates the current core's TLB for the virtual address assigned to
 /// the page.
-///
-/// # Assumptions
-///
-/// Assumes at least one page is in the table.
 pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize) {
+  assert!(count > 0);
+
   let idx = (count - 1) << 1;
 
+  // A null entry is a placeholder for a local mapping that is in low memory.
   if table[idx] == 0 {
     return;
   }
@@ -292,7 +302,7 @@ fn get_first_table_level(virtual_base: usize, virt_addr: usize) -> TableLevel {
 ///
 /// * `virtual_base` - The kernel segment base address.
 /// * `table_level` - The current table level.
-/// * `table_addr` - The address of the current page table.
+/// * `table_addr` - The physical address of the current page table.
 /// * `virt` - Base of the virtual address range.
 /// * `base` - Base of the physical address range.
 /// * `size` - Size of the physical address range.
@@ -334,7 +344,7 @@ fn fill_table(
 ///
 /// * `virtual_base` - The kernel segment base address.
 /// * `table_level` - The current table level.
-/// * `table_addr` - The address of the current page table.
+/// * `table_addr` - The physical address of the current page table.
 /// * `virt` - Base of the virtual address range.
 /// * `base` - Base of the physical address range.
 /// * `size` - Size of the physical address range.
@@ -451,7 +461,7 @@ fn fill_table_compact(
 ///
 /// * `virtual_base` - The kernel segment base address.
 /// * `table_level` - The current table level.
-/// * `table_addr` - The address of the current page table.
+/// * `table_addr` - The physical address of the current page table.
 /// * `virt` - Base of the virtual address range.
 /// * `base` - Base of the physical address range.
 /// * `size` - Size of the physical address range.
@@ -634,7 +644,7 @@ fn make_descriptor(
   }
 }
 
-/// Make a Level 2 block descriptor.
+/// Make a Level 1 or Level 2 block descriptor.
 ///
 /// # Parameters
 ///
@@ -707,7 +717,14 @@ fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<
         return None;
       }
 
-      Some((phys_addr | MM_PAGE_TABLE_FLAG_LONG, 0))
+      // Bits [11:2] are ignored at Levels 1 and 2. However, we want to be able
+      // to read/write the table through the recursive map. So, fill in the MAIR
+      // index in bits [4:2] and the access flag in bit 10. Leaving bits [7:6]
+      // as zero makes the page read/write for the kernel.
+      Some((
+        phys_addr | (MM_NORMAL_MAIR_IDX_LONG << 2) | MM_ACCESS_FLAG_LONG | MM_PAGE_TABLE_FLAG_LONG,
+        0,
+      ))
     }
   }
 }
@@ -781,6 +798,8 @@ fn get_table(table_vaddr: usize) -> &'static mut [usize] {
 ///
 /// The current table must be Level 1 or 2. Level 3 tables can only point to
 /// pages.
+///
+/// Recursion is bounded by the table levels.
 ///
 /// # Returns
 ///

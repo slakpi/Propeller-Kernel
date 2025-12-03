@@ -377,7 +377,7 @@ impl<'blob> DtbReader<'blob> {
   /// # Returns
   ///
   /// Returns the next property's header or None if a property is not found.
-  pub fn get_next_property(&self, cursor: &mut DtbCursor) -> Option<DtbPropertyHeader> {
+  pub fn get_next_property(&self, cursor: &mut DtbCursor) -> Option<DtbPropertyHeader<'_>> {
     loop {
       let marker = self.get_u32(cursor)?;
 
