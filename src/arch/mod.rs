@@ -3,17 +3,13 @@
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 #[cfg(target_arch = "arm")]
-pub mod arm;
+mod arm;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
-pub mod arm_common;
-
-pub mod common;
+mod arm_common;
+mod common;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::*;
 #[cfg(target_arch = "arm")]
 pub use arm::*;
-#[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
-pub use arm_common::*;
-
-pub use common::*;
+pub use common::bits;

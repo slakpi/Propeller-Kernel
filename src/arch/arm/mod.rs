@@ -5,11 +5,13 @@ mod mm;
 
 pub mod task;
 
-use crate::arch::{cpu, memory, task::TaskContext};
-use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
+pub use super::arm_common::{cpu, memory, sync};
+
+use super::arm_common::{dtb_cpu, dtb_memory};
+use super::common::table_allocator::LinearTableAllocator;
 use crate::support::{bits, dtb, range};
-use crate::task::Task;
 use core::ptr;
+use memory::{MappingStrategy, MemoryConfig};
 
 unsafe extern "C" {
   fn _secondary_start();
@@ -88,28 +90,10 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
 
 /// Memory layout configuration.
-static mut MEMORY_CONFIG: memory::MemoryConfig = memory::MemoryConfig::new();
+static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new();
 
 /// The base virtual address of the thread local mapping area.
 static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
-
-/// Helper type to force alignment of the local mapping table. The compiler will
-/// ensure the local mapping table is aligned to a page boundary and rearrange
-/// the remaining fields of the task structure accordingly.
-#[repr(C, align(4096))]
-struct AlignedTable([usize; 1024]);
-
-/// The bootstrap task's local mapping table.
-static mut BOOTSTRAP_LOCAL_TABLE: AlignedTable = AlignedTable([0; 1024]);
-
-/// The bootstrap task is a special task that exists only to provide a way to
-/// manage high memory mappings before the kernel allocators and scheduler are
-/// initialized. The bootstrap task will only be used by the primary core.
-///
-/// Once the kernel maps system memory, initializes the kernel allocators,
-/// initializes the scheduler, and enables the secondary cores, the bootstrap
-/// task will be replaced by the real init thread tasks.
-static mut BOOTSTRAP_TASK: Task = Task::new(0, TaskContext::new(0));
 
 /// ARM platform configuration.
 ///
@@ -164,7 +148,6 @@ pub fn init(config_addr: usize) {
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map();
-  init_bootstrap_task();
 }
 
 /// Get the size of a page.
@@ -262,12 +245,17 @@ pub fn get_page_virtual_address_for_virtual_address(virt_addr: usize) -> Option<
 
 /// Get the base virtual address of the thread local area for the current core.
 ///
+/// # Parameter
+///
+/// * `core_idx` - The current core index.
+///
 /// # Description
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
-fn get_thread_local_virtual_base() -> usize {
-  let offset = get_core_config().get_current_core_index() * get_section_size();
+fn get_thread_local_virtual_base(core_idx: usize) -> usize {
+  assert!(core_idx < get_core_config().get_core_count());
+  let offset = core_idx * get_section_size();
   unsafe { THREAD_LOCAL_VIRTUAL_BASE + offset }
 }
 
@@ -286,13 +274,23 @@ pub fn get_core_config() -> &'static cpu::CoreConfig {
   unsafe { ptr::addr_of!(CORE_CONFIG).as_ref().unwrap() }
 }
 
+/// Get the core index of the current core.
+/// 
+/// # Description
+/// 
+/// For any non-trivial use of the core index, interrupts must be disabled prior
+/// to calling to prevent the task from moving to another core.
+pub fn get_current_core_index() -> usize {
+  get_core_config().get_core_index(cpu::get_id()).unwrap()
+}
+
 /// Get the memory layout configuration.
 ///
 /// # Description
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
-pub fn get_memory_config() -> &'static memory::MemoryConfig {
+pub fn get_memory_config() -> &'static MemoryConfig {
   unsafe { ptr::addr_of!(MEMORY_CONFIG).as_ref().unwrap() }
 }
 
@@ -312,7 +310,7 @@ fn get_kernel_config() -> &'static KernelConfig {
 /// * `blob_vaddr` - The DTB blob virtual address.
 fn init_core_config(blob_vaddr: usize) {
   unsafe {
-    assert!(cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
+    assert!(dtb_cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
   }
 }
 
@@ -336,7 +334,7 @@ fn init_core_config(blob_vaddr: usize) {
 /// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
-  assert!(memory::get_memory_layout(mem_config, blob_vaddr));
+  assert!(dtb_memory::get_memory_layout(mem_config, blob_vaddr));
 
   let kconfig = get_kernel_config();
   let section_size = get_section_size();
@@ -399,6 +397,7 @@ fn init_direct_map() {
   let mut allocator = LinearTableAllocator::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
+    get_page_size(),
   );
 
   for range in low_mem.get_ranges() {
@@ -412,40 +411,4 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
-}
-
-/// Initialize the bootstrap task.
-///
-/// # Description
-///
-/// There is no need to go through the normal context switch process. The
-/// bootstrap task is technically already "running." We only need to set the
-/// running task pointer on the primary core and map the task's local mapping
-/// table into the kernel page tables.
-///
-/// # Assumptions
-///
-/// Assumes the caller is running on the primary core.
-pub fn init_bootstrap_task() {
-  let task = unsafe { ptr::addr_of_mut!(BOOTSTRAP_TASK).as_mut().unwrap() };
-  let table_vaddr = unsafe { ptr::addr_of!(BOOTSTRAP_LOCAL_TABLE) as usize };
-
-  // Setup the bootstrap local mapping table.
-  //
-  // NOTE: The bootstrap task's local mapping table is part of the kernel
-  //       image in low memory. It is safe to just subtract the virtual base
-  //       to get the physical address.
-  let table_addr = table_vaddr - get_kernel_virtual_base();
-  task.get_context_mut().set_table_addr(table_addr);
-
-  // Map the task's local mapping table into the kernel address space. The
-  // assumption is that the caller is running on the primary core, so the table
-  // maps to the beginning of the thread-local area.
-  mm::map_thread_local_table(
-    get_kernel_config().kernel_pages_start,
-    get_thread_local_virtual_base(),
-    table_addr,
-  );
-
-  Task::set_current_task(task);
 }

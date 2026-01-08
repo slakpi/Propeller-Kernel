@@ -1,6 +1,6 @@
 //! AArch64 Task Management
 
-use super::cpu;
+use crate::arch::cpu;
 
 unsafe extern "C" {
   fn task_get_current_task_addr() -> usize;
@@ -11,9 +11,14 @@ const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + usize::BITS as usize - 1) / usiz
 
 pub type AffinityMask = [usize; CPU_MASK_WORDS];
 
+/// Re-initialization guard.
+static mut INITIALIZED: bool = false;
+
 /// AArch64 task context.
 ///
 ///   TODO: Add floating-point registers for user tasks.
+///
+///   TODO: Implement context switching.
 pub struct TaskContext {
   x19: usize,
   x20: usize,
@@ -31,8 +36,8 @@ pub struct TaskContext {
 }
 
 impl TaskContext {
-  /// Construct a new task context.
-  pub const fn new() -> Self {
+  /// Construct an empty task context.
+  pub const fn default() -> Self {
     TaskContext {
       x19: 0,
       x20: 0,
@@ -48,6 +53,11 @@ impl TaskContext {
       x30: 0,
       sp: 0,
     }
+  }
+
+  /// Construct a new task context.
+  pub fn new() -> Self {
+    Self::default()
   }
 
   /// Get the current pin mask.
@@ -82,6 +92,21 @@ impl TaskContext {
   ///   NOTE: This function exists to satisfy the TaskContext interface
   ///         requirements and does nothing.
   pub fn unmap_page(&mut self) {}
+}
+
+/// Initialize the bootstrap task context.
+///
+/// # Description
+///
+///   NOTE: This function exists to satisfy the TaskContext interface
+///         requirements and simply returns an empty task context.
+pub fn init_bootstrap_context() -> TaskContext {
+  unsafe {
+    assert!(!INITIALIZED);
+    INITIALIZED = true;
+  }
+
+  TaskContext::new()
 }
 
 /// Get the current task address from the task register.

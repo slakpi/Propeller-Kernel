@@ -5,11 +5,13 @@ mod mm;
 
 pub mod task;
 
-use crate::arch::{cpu, memory, task::TaskContext};
-use crate::mm::{MappingStrategy, table_allocator::LinearTableAllocator};
+pub use super::arm_common::{cpu, memory, sync};
+
+use super::arm_common::{dtb_cpu, dtb_memory};
+use super::common::table_allocator::LinearTableAllocator;
 use crate::support::{bits, dtb, range};
-use crate::task::Task;
 use core::ptr;
+use memory::{MappingStrategy, MemoryConfig};
 
 unsafe extern "C" {
   fn _secondary_start();
@@ -77,11 +79,7 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
 
 /// Memory layout configuration.
-static mut MEMORY_CONFIG: memory::MemoryConfig = memory::MemoryConfig::new();
-
-/// Bootstrap task to ensure a valid task object is in the task register to
-/// satisfy the thread-local mapping interface. This task is effectively unused.
-static mut BOOTSTRAP_TASK: Task = Task::new(0, TaskContext::new());
+static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new();
 
 /// AArch64 platform configuration.
 ///
@@ -130,7 +128,6 @@ pub fn init(config_addr: usize) {
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map();
-  init_bootstrap_task();
 }
 
 /// Get the size of a page.
@@ -189,7 +186,7 @@ pub fn get_core_config() -> &'static cpu::CoreConfig {
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
-pub fn get_memory_config() -> &'static memory::MemoryConfig {
+pub fn get_memory_config() -> &'static MemoryConfig {
   unsafe { ptr::addr_of!(MEMORY_CONFIG).as_ref().unwrap() }
 }
 
@@ -209,7 +206,7 @@ fn get_kernel_config() -> &'static KernelConfig {
 /// * `blob_vaddr` - The DTB blob virtual address.
 fn init_core_config(blob_vaddr: usize) {
   unsafe {
-    assert!(cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
+    assert!(dtb_cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
   }
 }
 
@@ -233,7 +230,7 @@ fn init_core_config(blob_vaddr: usize) {
 /// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
-  assert!(memory::get_memory_layout(mem_config, blob_vaddr));
+  assert!(dtb_memory::get_memory_layout(mem_config, blob_vaddr));
 
   let kconfig = get_kernel_config();
   let section_size = get_section_size();
@@ -276,6 +273,7 @@ fn init_direct_map() {
   let mut allocator = LinearTableAllocator::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
+    get_page_size(),
   );
 
   for range in mem_config.get_ranges() {
@@ -289,20 +287,4 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
-}
-
-/// Initialize the bootstrap task.
-///
-/// # Description
-///
-/// There is no need to go through the normal context switch process. The
-/// bootstrap task is technically already "running." We only need to set the
-/// running task pointer on the primary core
-///
-/// # Assumptions
-///
-/// Assumes the caller is running on the primary core.
-fn init_bootstrap_task() {
-  let task = unsafe { ptr::addr_of_mut!(BOOTSTRAP_TASK).as_mut().unwrap() };
-  Task::set_current_task(task);
 }

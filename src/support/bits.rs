@@ -3,7 +3,7 @@
 //! http://aggregate.org/MAGIC/
 //! http://graphics.stanford.edu/~seander/bithacks.html
 
-pub use crate::arch::common::bits::*;
+pub use crate::arch::bits::*;
 
 /// The number of bytes in a machine word.
 pub const WORD_BYTES: usize = (usize::BITS / 8) as usize;
@@ -83,10 +83,10 @@ pub const fn is_aligned(addr: usize, boundary: usize) -> bool {
 ///
 /// # Returns
 ///
-/// True if the number is a power of 2, false otherwise. The check against 0
-/// ensures 0 is not reported as a power of 2 and prevents the subtraction from
-/// asserting.
+/// True if the number is a power of 2, false otherwise.
 pub const fn is_power_of_2(n: usize) -> bool {
+  // The check against 0 ensures 0 is not reported as a power of 2 and prevents
+  // the subtraction from asserting.
   (n != 0) && ((n & (n - 1)) == 0)
 }
 

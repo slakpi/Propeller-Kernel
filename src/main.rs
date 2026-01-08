@@ -32,6 +32,7 @@ fn panic(_info: &PanicInfo) -> ! {
 #[unsafe(no_mangle)]
 extern "C" fn pk_init(config: usize) {
   arch::init(config);
+  task::init();
 }
 
 /// Scheduler entry point.

@@ -2,6 +2,20 @@
 
 pub use crate::arch::task::*;
 
+use core::ptr;
+
+/// Re-initialization guard.
+static mut INITIALIZED: bool = false;
+
+/// The bootstrap task is a special task that exists only to provide a way to
+/// manage high memory mappings before the kernel allocators and scheduler are
+/// initialized. The bootstrap task will only be used by the primary core.
+///
+/// Once the kernel maps system memory, initializes the kernel allocators,
+/// initializes the scheduler, and enables the secondary cores, the bootstrap
+/// task will be replaced by the real init thread tasks.
+static mut BOOTSTRAP_TASK: Task = Task::new(0, TaskContext::default());
+
 /// The architecture-independent task object.
 ///
 /// The architecture must implement the TaskContext object for architecture-
@@ -116,4 +130,26 @@ impl Task {
   pub fn unmap_page(&mut self) {
     self.context.unmap_page();
   }
+}
+
+/// Initialize the task module and the bootstrap task.
+///
+/// # Description
+///
+///   NOTE: Must only be called once while the kernel is single-threaded.
+pub fn init() {
+  unsafe {
+    assert!(!INITIALIZED);
+    INITIALIZED = true;
+  }
+
+  // There is no need to go through the normal context switch process. The
+  // bootstrap task is technically already "running." We only need to set the
+  // running task pointer on the primary core and map the task's local mapping
+  // table into the kernel page tables.
+  let task = unsafe { ptr::addr_of_mut!(BOOTSTRAP_TASK).as_mut().unwrap() };
+  *task = Task::new(0, init_bootstrap_context());
+
+  // Update the current task pointer.
+  Task::set_current_task(task);
 }

@@ -1,6 +1,7 @@
 //! ARM Memory Management
 
-use crate::mm::{MappingStrategy, table_allocator::TableAllocator};
+use crate::arch::common::table_allocator::TableAllocator;
+use crate::arch::memory::MappingStrategy;
 use crate::support::bits;
 use core::{cmp, ptr, slice};
 
