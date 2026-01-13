@@ -18,10 +18,10 @@ pub enum MemoryZone {
 pub const MAX_MEM_RANGES: usize = 64;
 
 /// Convenience range type.
-pub type MemoryRange = range::Range;
+pub type MemoryRange = range::Range<MemoryZone>;
 
 /// Convenience range set type.
-pub type MemoryConfig = range_set::RangeSet<MAX_MEM_RANGES>;
+pub type MemoryConfig = range_set::RangeSet<MAX_MEM_RANGES, MemoryZone>;
 
 /// Handles memory ranges as they are discovered.
 pub trait MemoryRangeHandler {

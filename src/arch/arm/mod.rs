@@ -11,7 +11,7 @@ use super::arm_common::{dtb_cpu, dtb_memory};
 use super::common::table_allocator::LinearTableAllocator;
 use crate::support::{bits, dtb, range};
 use core::ptr;
-use memory::{MappingStrategy, MemoryConfig};
+use memory::{MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone};
 
 unsafe extern "C" {
   fn _secondary_start();
@@ -90,10 +90,60 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
 
 /// Memory layout configuration.
-static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new();
+static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new(MemoryZone::InvalidZone);
 
 /// The base virtual address of the thread local mapping area.
 static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
+
+/// Tags memory ranges with the appropriate zone.
+pub struct RangeZoneTagger {
+  high_mem_base: usize,
+}
+
+impl RangeZoneTagger {
+  /// Construct a new MemoryRangeHandler32Bit.
+  ///
+  /// # Parameters
+  ///
+  /// * `high_mem_base` - The physical base address of high memory.
+  pub fn new(high_mem_base: usize) -> Self {
+    Self { high_mem_base }
+  }
+}
+
+impl MemoryRangeHandler for RangeZoneTagger {
+  /// See `MemoryRangeHandler::handle_range()`.
+  ///
+  /// # Description
+  ///
+  /// Splits the provided range at the high memory base and tags the resulting
+  /// range(s) as appropriate before adding them to the configuration.
+  fn handle_range(&self, config: &mut MemoryConfig, base: usize, size: usize) {
+    let range = MemoryRange {
+      tag: MemoryZone::InvalidZone,
+      base,
+      size,
+    };
+
+    let (rl, rh) = range.split(self.high_mem_base).unwrap();
+
+    if let Some(rl) = rl {
+      config.insert_range(MemoryRange {
+        tag: MemoryZone::LowMemoryZone,
+        base: rl.base,
+        size: rl.size,
+      });
+    }
+
+    if let Some(rh) = rh {
+      config.insert_range(MemoryRange {
+        tag: MemoryZone::HighMemoryZone,
+        base: rh.base,
+        size: rh.size,
+      });
+    }
+  }
+}
 
 /// ARM platform configuration.
 ///
@@ -275,9 +325,9 @@ pub fn get_core_config() -> &'static cpu::CoreConfig {
 }
 
 /// Get the core index of the current core.
-/// 
+///
 /// # Description
-/// 
+///
 /// For any non-trivial use of the core index, interrupts must be disabled prior
 /// to calling to prevent the task from moving to another core.
 pub fn get_current_core_index() -> usize {
@@ -331,10 +381,11 @@ fn init_core_config(blob_vaddr: usize) {
 /// # Assumptions
 ///
 /// Assumes the system is configured correctly and that there will not be any
-/// overflow when calculating end of the kernel or blob..
+/// overflow when calculating end of the kernel or blob.
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
+  let tagger = RangeZoneTagger::new(get_high_mem_base());
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
-  assert!(dtb_memory::get_memory_layout(mem_config, blob_vaddr));
+  assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
 
   let kconfig = get_kernel_config();
   let section_size = get_section_size();
@@ -342,15 +393,18 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let blob_size = bits::align_up(kconfig.blob + blob_size, section_size) - blob_start;
 
   let excl = &[
-    range::Range {
+    range::Range::<MemoryZone> {
+      tag: MemoryZone::InvalidZone,
       base: kconfig.virtual_base,
       size: usize::MAX - kconfig.virtual_base + 1,
     },
-    range::Range {
+    range::Range::<MemoryZone> {
+      tag: MemoryZone::InvalidZone,
       base: 0,
       size: bits::align_up(kconfig.kernel_base + kconfig.kernel_size, section_size),
     },
-    range::Range {
+    range::Range::<MemoryZone> {
+      tag: MemoryZone::InvalidZone,
       base: blob_start,
       size: blob_size,
     },
@@ -383,7 +437,8 @@ fn init_direct_map() {
   // be linearly mapped into the low memory area.
   let mut low_mem = *get_memory_config();
   let high_mem_base = get_high_mem_base();
-  let excl = range::Range {
+  let excl = range::Range::<MemoryZone> {
+    tag: MemoryZone::InvalidZone,
     base: high_mem_base,
     size: usize::MAX - high_mem_base + 1,
   };

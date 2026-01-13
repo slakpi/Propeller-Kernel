@@ -183,7 +183,7 @@ fn fill_table(
 /// * `device` - Whether this block or page maps to device memory.
 /// * `allocator` - The allocator that will provide new table pages.
 ///
-/// # Details
+/// # Description
 ///
 /// AArch64 provides four levels of address space translation. With 4 KiB pages,
 /// the page tables can address 256 TiB of memory:

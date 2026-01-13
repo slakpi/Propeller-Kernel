@@ -4,71 +4,42 @@ use super::range::{Range, RangeOrdering};
 
 /// Fixed-size, ordered set of Ranges.
 #[derive(Copy, Clone)]
-pub struct RangeSet<const SET_SIZE: usize> {
-  ranges: [Range; SET_SIZE],
+pub struct RangeSet<const SET_SIZE: usize, TagType>
+where
+  TagType: Copy,
+{
+  ranges: [Range<TagType>; SET_SIZE],
   count: usize,
 }
 
-impl<const SET_SIZE: usize> RangeSet<SET_SIZE> {
+impl<const SET_SIZE: usize, TagType> RangeSet<SET_SIZE, TagType>
+where
+  TagType: Copy,
+{
   /// Construct a new RangeSet.
-  ///
-  /// # Returns
-  ///
-  /// An empty RangeSet.
-  pub const fn new() -> Self {
-    RangeSet {
-      ranges: [Range { base: 0, size: 0 }; SET_SIZE],
+  pub const fn new(default_tag: TagType) -> Self {
+    Self {
+      ranges: [Range {
+        tag: default_tag,
+        base: 0,
+        size: 0,
+      }; SET_SIZE],
       count: 0,
     }
   }
 
-  /// Construct a new RangeSet with a list of ranges.
-  ///
-  /// # Parameters
-  ///
-  /// * `ranges` - A list of ranges to insert into the new set.
-  ///
-  /// # Returns
-  ///
-  /// A new RangeSet. The new set only includes valid, mutually exclusive ranges
-  /// and may be empty. The new set will include, at most, the first `SET_SIZE`
-  /// ranges from the range list.
-  pub fn new_with_ranges(ranges: &[Range]) -> Self {
-    let mut set = Self::new();
-
-    for range in ranges {
-      _ = set.insert_range(*range);
-    }
-
-    set.trim_ranges();
-
-    set
-  }
-
   /// Check if the set is empty.
-  ///
-  /// # Returns
-  ///
-  /// True if the set is empty, false otherwise.
   pub fn is_empty(&self) -> bool {
     self.count == 0
   }
 
   /// Get the length of the set.
-  ///
-  /// # Returns
-  ///
-  /// The number of ranges in the set.
   pub fn len(&self) -> usize {
     self.count
   }
 
   /// Access the ranges.
-  ///
-  /// # Returns
-  ///
-  /// A slice with the valid ranges.
-  pub fn get_ranges(&self) -> &[Range] {
+  pub fn get_ranges(&self) -> &[Range<TagType>] {
     &self.ranges[..self.count]
   }
 
@@ -86,7 +57,7 @@ impl<const SET_SIZE: usize> RangeSet<SET_SIZE> {
   /// # Returns
   ///
   /// True if able to insert the new range, false otherwise.
-  pub fn insert_range(&mut self, range: Range) -> bool {
+  pub fn insert_range(&mut self, range: Range<TagType>) -> bool {
     if self.count >= SET_SIZE {
       return false;
     }
@@ -116,11 +87,11 @@ impl<const SET_SIZE: usize> RangeSet<SET_SIZE> {
   /// # Parameters
   ///
   /// * `excl` - The range to exclude.
-  pub fn exclude_range(&mut self, excl: &Range) {
+  pub fn exclude_range(&mut self, excl: &Range<TagType>) {
     let mut i = 0usize;
 
     while i < self.count {
-      let Ok(split) = self.ranges[i].split_range(excl) else {
+      let Ok(split) = self.ranges[i].exclude(excl) else {
         return;
       };
 
@@ -142,7 +113,7 @@ impl<const SET_SIZE: usize> RangeSet<SET_SIZE> {
           self.count += 1;
           i += 1;
         } else {
-          assert!(false, "Could not split range; set is full.");
+          panic!("Could not split range; set is full.");
         }
       }
 

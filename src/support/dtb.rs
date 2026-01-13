@@ -283,7 +283,7 @@ impl<'blob> DtbReader<'blob> {
   /// * `skip_bytes` - The number of bytes to skip.
   /// * `cursor` - The cursor to advance.
   ///
-  /// # Details
+  /// # Description
   ///
   /// If skipping the specified number of bytes would place the cursor past the
   /// end of the DTB, the cursor is positioned at the end of the DTB and is no
@@ -350,7 +350,7 @@ impl<'blob> DtbReader<'blob> {
   ///
   /// * `cursor` - Cursor pointing to the location to read.
   ///
-  /// # Details
+  /// # Description
   ///
   /// Assumes that the caller has already verified that 32-bits remain after the
   /// position pointed to by the cursor.

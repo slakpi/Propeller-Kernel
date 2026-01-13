@@ -17,7 +17,7 @@ fn main() {
   } else if target_arch == "arm" {
     configure_for_arm(&mut cfg);
   } else {
-    assert!(false, "Invalid target architecture.");
+    panic!("Invalid target architecture.");
   }
 
   cfg.compile("start");

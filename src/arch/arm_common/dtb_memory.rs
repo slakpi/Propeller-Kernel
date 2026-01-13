@@ -17,6 +17,7 @@ type StringMap<'map> = hash_map::HashMap<&'map [u8], StringTag, hash::BuildFnv1a
 /// Scans for DTB memory nodes.
 struct DtbMemoryScanner<'mem> {
   config: &'mem mut MemoryConfig,
+  handler: &'mem dyn MemoryRangeHandler,
   string_map: StringMap<'mem>,
   addr_cells: u32,
   size_cells: u32,
@@ -28,13 +29,15 @@ impl<'mem> DtbMemoryScanner<'mem> {
   /// # Parameters
   ///
   /// * `config` - The MemoryConfig that will store the ranges found in the DTB.
+  /// * `handler` - The memory range handler.
   ///
   /// # Returns
   ///
   /// A new DtbMemoryScanner.
-  pub fn new(config: &'mem mut MemoryConfig) -> Self {
+  pub fn new(config: &'mem mut MemoryConfig, handler: &'mem dyn MemoryRangeHandler) -> Self {
     DtbMemoryScanner {
       config,
+      handler,
       string_map: Self::build_string_map(),
       addr_cells: 0,
       size_cells: 0,
@@ -244,17 +247,31 @@ impl<'mem> DtbMemoryScanner<'mem> {
         continue;
       }
 
-      // Use 128-bit math to compute the maximum size. If usize is 64-bit and
-      // base is 0, then `usize::MAX - base + 1` will overflow a usize. Unless
-      // something is wrong with the DTB, however, we are guaranteed that the
-      // clamped size will not overflow a usize since u64::MAX is the largest
-      // value for a memory range size in a DTB and a 16 EiB block of physical
-      // memory is wildly impractical.
-      let max_size = cmp::max(size as u128, usize::MAX as u128 - base as u128 + 1);
-      _ = self.config.insert_range(range::Range {
-        base: base as usize,
-        size: cmp::min(size as u128, max_size) as usize,
-      });
+      // Skip zero-size ranges.
+      if size == 0 {
+        continue;
+      }
+
+      // u64::MAX is largest *size* that can be expressed in a DTB. That means
+      // the largest *range* possible is〈0x0, u64::MAX〉which translates to the
+      // interval [0x0, u64::MAX - 1].
+      //
+      // However,〈0x1, u64::MAX〉and〈u64::MAX, 1〉are also a *valid* ranges, so
+      // we cannot just use `u64::MAX - base` to calculate the maximum size from
+      // the base.
+      //
+      // We have already checked that the base is less than or equal to
+      // usize::MAX, so subtracting the base to get the maximum size of the
+      // range in the platform's addressable range is safe.
+      let size = if base == 0 {
+        cmp::min(size, usize::MAX as u64)
+      } else {
+        cmp::min(size, usize::MAX as u64 - base + 1)
+      };
+
+      self
+        .handler
+        .handle_range(self.config, base as usize, size as usize);
     }
 
     Ok(())
@@ -284,6 +301,7 @@ impl<'mem> dtb::DtbScanner for DtbMemoryScanner<'mem> {
 /// # Parameters
 ///
 /// * `config` - The memory configuration.
+/// * `handler` - The memory range handler.
 /// * `blob` - The DTB address.
 ///
 /// # Assumptions
@@ -294,10 +312,14 @@ impl<'mem> dtb::DtbScanner for DtbMemoryScanner<'mem> {
 ///
 /// True if able to read the memory configuration and at least one valid memory
 /// range is provided by the SoC, false otherwise.
-pub fn get_memory_layout(config: &mut MemoryConfig, blob: usize) -> bool {
+pub fn get_memory_layout(
+  config: &mut MemoryConfig,
+  handler: &dyn MemoryRangeHandler,
+  blob: usize,
+) -> bool {
   debug_assert!(config.is_empty());
 
-  let mut scanner = DtbMemoryScanner::new(config);
+  let mut scanner = DtbMemoryScanner::new(config, handler);
 
   let reader = match dtb::DtbReader::new(blob) {
     Ok(r) => r,

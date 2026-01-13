@@ -11,7 +11,7 @@ use super::arm_common::{dtb_cpu, dtb_memory};
 use super::common::table_allocator::LinearTableAllocator;
 use crate::support::{bits, dtb, range};
 use core::ptr;
-use memory::{MappingStrategy, MemoryConfig};
+use memory::{MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone};
 
 unsafe extern "C" {
   fn _secondary_start();
@@ -79,7 +79,25 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
 
 /// Memory layout configuration.
-static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new();
+static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new(MemoryZone::InvalidZone);
+
+/// Tags memory ranges with the appropriate zone.
+pub struct RangeZoneTagger {}
+
+impl MemoryRangeHandler for RangeZoneTagger {
+  /// See `MemoryRangeHandler::handle_range()`.
+  ///
+  /// # Description
+  ///
+  /// All memory in an 64-bit platform is low memory.
+  fn handle_range(&self, config: &mut MemoryConfig, base: usize, size: usize) {
+    config.insert_range(MemoryRange {
+      tag: MemoryZone::LowMemoryZone,
+      base,
+      size,
+    });
+  }
+}
 
 /// AArch64 platform configuration.
 ///
@@ -229,8 +247,9 @@ fn init_core_config(blob_vaddr: usize) {
 /// Assumes the system is configured correctly and that there will not be any
 /// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
+  let tagger = RangeZoneTagger {};
   let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
-  assert!(dtb_memory::get_memory_layout(mem_config, blob_vaddr));
+  assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
 
   let kconfig = get_kernel_config();
   let section_size = get_section_size();
@@ -238,15 +257,18 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let blob_size = bits::align_up(kconfig.blob + blob_size, section_size) - blob_start;
 
   let excl = &[
-    range::Range {
+    range::Range::<MemoryZone> {
+      tag: MemoryZone::InvalidZone,
       base: kconfig.virtual_base,
       size: usize::MAX - kconfig.virtual_base + 1,
     },
-    range::Range {
+    range::Range::<MemoryZone> {
+      tag: MemoryZone::InvalidZone,
       base: 0,
       size: bits::align_up(kconfig.kernel_base + kconfig.kernel_size, section_size),
     },
-    range::Range {
+    range::Range::<MemoryZone> {
+      tag: MemoryZone::InvalidZone,
       base: blob_start,
       size: blob_size,
     },

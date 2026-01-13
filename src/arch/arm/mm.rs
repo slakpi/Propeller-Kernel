@@ -352,7 +352,7 @@ fn fill_table(
 /// * `device` - Whether this block or page maps to device memory.
 /// * `allocator` - The allocator that will provide new table pages.
 ///
-/// # Details
+/// # Description
 ///
 /// The "classic" ARM MMU supports two levels of address translation using
 /// 32-bit page table descriptors.

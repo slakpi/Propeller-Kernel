@@ -1,32 +1,38 @@
 //! Range Utilities
 
 /// Range ordering.
-///
-/// * `Less` - The LHS is fully to the left of the RHS.
-/// * `LessEqual` - The LHS partially overlaps the beginning of the RHS.
-/// * `GreaterEqual` - The LHS partially overlaps the end of the RHS.
-/// * `Greater` - The LHS is fully to the right of the RHS.
-/// * `Equal` - The two ranges are exactly equal.
-/// * `Superset` - The LHS fully contains the RHS.
-/// * `Subset` - The LHS is fully contained by the RHS.
 pub enum RangeOrdering {
+  /// The LHS is fully to the left of the RHS.
   Less,
+  /// The LHS partially overlaps the beginning of the RHS.
   LessEqual,
+  /// The LHS partially overlaps the end of the RHS.
   GreaterEqual,
+  /// The LHS is fully to the right of the RHS.
   Greater,
+  /// The two ranges are exactly equal.
   Equal,
+  /// The LHS fully contains the RHS.
   Superset,
+  /// The LHS is fully contained by the RHS.
   Subset,
 }
 
 /// A contiguous range of values in the interval `[base, base + size)`.
 #[derive(Copy, Clone)]
-pub struct Range {
+pub struct Range<TagType>
+where
+  TagType: Copy,
+{
+  pub tag: TagType,
   pub base: usize,
   pub size: usize,
 }
 
-impl Range {
+impl<TagType> Range<TagType>
+where
+  TagType: Copy,
+{
   /// Compare two ranges.
   ///
   /// # Parameters
@@ -35,8 +41,8 @@ impl Range {
   ///
   /// # Returns
   ///
-  /// A range ordering or Err if the ranges are invalid.
-  pub fn cmp(&self, rhs: &Range) -> Option<RangeOrdering> {
+  /// A range ordering or None if the either range is invalid.
+  pub fn cmp(&self, rhs: &Self) -> Option<RangeOrdering> {
     if self.size == 0 || rhs.size == 0 {
       return None;
     }
@@ -47,31 +53,31 @@ impl Range {
     if self.base == rhs.base && self.size == rhs.size {
       // lhs  |---------------|
       // rhs  |---------------|
-      return Some(RangeOrdering::Equal);
+      Some(RangeOrdering::Equal)
     } else if lhs_end < rhs.base {
       // lhs  |-----|
       // rhs         |---------------|
-      return Some(RangeOrdering::Less);
+      Some(RangeOrdering::Less)
     } else if rhs_end < self.base {
       // lhs                   |-----|
       // rhs  |---------------|
-      return Some(RangeOrdering::Greater);
+      Some(RangeOrdering::Greater)
     } else if self.base <= rhs.base && lhs_end >= rhs_end {
       // lhs  |---------------|
       // rhs   |-----|
-      return Some(RangeOrdering::Superset);
+      Some(RangeOrdering::Superset)
     } else if rhs.base <= self.base && rhs_end >= lhs_end {
       // lhs           |-----|
       // rhs  |---------------|
-      return Some(RangeOrdering::Subset);
+      Some(RangeOrdering::Subset)
     } else if self.base < rhs.base {
       // lhs  |-----|
       // rhs     |---------------|
-      return Some(RangeOrdering::LessEqual);
+      Some(RangeOrdering::LessEqual)
     } else {
       // lhs               |-----|
       // rhs  |---------------|
-      return Some(RangeOrdering::GreaterEqual);
+      Some(RangeOrdering::GreaterEqual)
     }
   }
 
@@ -81,7 +87,7 @@ impl Range {
   ///
   /// * `excl` - The range to exclude.
   ///
-  /// # Details
+  /// # Description
   ///
   /// * If the ranges are mutually exclusive, returns the original range as the
   ///   first element in the tuple and None for the second.
@@ -103,10 +109,13 @@ impl Range {
   /// range as well as the exclusion range overlapping either end of the range
   /// and handles returning None if the overlap results in empty ranges.
   ///
+  /// If the range cannot be compared with the exclusion range, returns an
+  /// Error.
+  ///
   /// # Returns
   ///
-  /// A tuple with the resulting range(s) of the split. See details.
-  pub fn split_range(&self, excl: &Range) -> Result<(Option<Range>, Option<Range>), ()> {
+  /// A tuple with the resulting range(s) of the split. See description.
+  pub fn exclude(&self, excl: &Self) -> Result<(Option<Self>, Option<Self>), ()> {
     let order = self.cmp(excl).ok_or(())?;
 
     match order {
@@ -148,7 +157,8 @@ impl Range {
     //      |---|     |-----|
     //        a          b
     let a = match order {
-      RangeOrdering::LessEqual | RangeOrdering::Superset => Some(Range {
+      RangeOrdering::LessEqual | RangeOrdering::Superset => Some(Self {
+        tag: self.tag,
         base: self.base,
         size: excl.base - self.base,
       }),
@@ -157,7 +167,8 @@ impl Range {
     };
 
     let b = match order {
-      RangeOrdering::GreaterEqual | RangeOrdering::Superset => Some(Range {
+      RangeOrdering::GreaterEqual | RangeOrdering::Superset => Some(Self {
+        tag: self.tag,
         base: excl_end + 1,
         size: my_end - excl_end,
       }),
@@ -166,5 +177,56 @@ impl Range {
     };
 
     Ok((a, b))
+  }
+
+  /// Split a range at a specific point.
+  ///
+  /// # Parameters
+  ///
+  /// * `at` - The split point.
+  ///
+  /// # Description
+  ///
+  /// * If the split point is less than or equal to the range base, returns None
+  ///   for the first element in the tuple and copy of the range in the second.
+  ///
+  /// * If the split point is greater than or equal to the open end of the
+  ///   range, returns a copy of the range in the first element of the tuple and
+  ///   None in the second.
+  ///
+  /// * If the split point is within the range, the first element of the tuple
+  ///   is the low part of the range, `[base, at)`, and the second element is
+  ///   the high part of the range, `[at, end)`.
+  ///
+  /// * If the size of the range is zero, returns an Error.
+  ///
+  /// # Returns
+  ///
+  /// A tuple with the resulting range(s) of the split. See description.
+  pub fn split(&self, at: usize) -> Result<(Option<Self>, Option<Self>), ()> {
+    if self.size == 0 {
+      return Err(());
+    }
+
+    let my_end = self.base + (self.size - 1);
+
+    if at <= self.base {
+      return Ok((None, Some(*self)));
+    } else if at > my_end {
+      return Ok((Some(*self), None));
+    }
+
+    Ok((
+      Some(Self {
+        tag: self.tag,
+        base: self.base,
+        size: at - self.base,
+      }),
+      Some(Self {
+        tag: self.tag,
+        base: at,
+        size: my_end - at + 1,
+      }),
+    ))
   }
 }
