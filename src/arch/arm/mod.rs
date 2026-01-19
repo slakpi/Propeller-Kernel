@@ -4,8 +4,11 @@ mod exceptions;
 mod mm;
 
 pub mod task;
+#[cfg(feature = "module_tests")]
+pub mod tests;
 
-pub use super::arm_common::{cpu, memory, sync};
+pub use super::arm_common::{cpu, sync};
+pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
 use super::common::table_allocator::LinearTableAllocator;
@@ -45,10 +48,10 @@ const VECTORS_VIRTUAL_BASE: usize = 0xffff_0000;
 const RECURSIVE_MAP_AREA: usize = 0xffc0_0000;
 
 /// The size of the virtual area reserved for the page directory.
-const PAGE_DIRECTORY_SIZE: usize = 32 * 1024 * 1024;
+const PAGE_DATABASE_SIZE: usize = 24 * 1024 * 1024;
 
 /// The base virtual address of the page directory.
-const PAGE_DIRECTORY_VIRTUAL_BASE: usize = VECTORS_VIRTUAL_BASE - PAGE_DIRECTORY_SIZE;
+const PAGE_DATABASE_VIRTUAL_BASE: usize = RECURSIVE_MAP_AREA - PAGE_DATABASE_SIZE;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -86,11 +89,8 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
   primary_stack_start: 0,
 };
 
-/// CPU core configuration.
-static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
-
-/// Memory layout configuration.
-static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new(MemoryZone::InvalidZone);
+/// System device tree.
+static mut DEVICE_TREE: device_tree::DeviceTree = device_tree::DeviceTree::new();
 
 /// The base virtual address of the thread local mapping area.
 static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
@@ -260,68 +260,23 @@ pub fn get_kernel_virtual_base() -> usize {
   unsafe { KERNEL_CONFIG.virtual_base }
 }
 
-/// Get the virtual base address of a page table that maps a given virtual
-/// address.
-///
-/// # Parameters
-///
-/// * `virt_addr` - A virtual address in the kernel's address space.
-///
-/// # Description
-///
-/// The Level 2 page table that serves the upper 1 GiB of the kernel's address
-/// space has a recursive mapping to allow editing of itself and any Level 3
-/// table entries.
-///
-///   NOTE: In a 2/2 split, the lower 1 GiB of the kernel's address space will
-///         always contain linear physical memory mappings and will never need
-///         to be modified after boot.
-///
-/// # Returns
-///
-/// The virtual address of the page table that maps a given virtual address or
-/// None if the given virtual address is not in the upper 1 GiB of the kernel's
-/// address space.
-pub fn get_page_virtual_address_for_virtual_address(virt_addr: usize) -> Option<usize> {
-  // Only the upper 1 GiB of the kernel address space is served by the recursive
-  // map area.
-  if virt_addr < 0xc000_0000 {
-    return None;
-  }
-
-  let index = (virt_addr - 0xc000_0000) / SECTION_SIZE;
-  Some(RECURSIVE_MAP_AREA + (index << PAGE_SHIFT))
-}
-
-/// Get the base virtual address of the thread local area for the current core.
-///
-/// # Parameter
-///
-/// * `core_idx` - The current core index.
-///
-/// # Description
-///
-///   NOTE: The interface guarantees read-only access outside of the module and
-///         one-time initialization is assumed.
-fn get_thread_local_virtual_base(core_idx: usize) -> usize {
-  assert!(core_idx < get_core_config().get_core_count());
-  let offset = core_idx * get_section_size();
-  unsafe { THREAD_LOCAL_VIRTUAL_BASE + offset }
-}
-
 /// Get the base physical address of the high memory area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
 fn get_high_mem_base() -> usize {
   usize::MAX - get_kernel_virtual_base() - HIGH_MEM_SIZE + 1
 }
 
-/// Get the full core configuration.
+/// Get the system device tree.
 ///
 /// # Description
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
-pub fn get_core_config() -> &'static cpu::CoreConfig {
-  unsafe { ptr::addr_of!(CORE_CONFIG).as_ref().unwrap() }
+pub fn get_device_tree() -> &'static device_tree::DeviceTree {
+  unsafe { ptr::addr_of!(DEVICE_TREE).as_ref().unwrap() }
 }
 
 /// Get the core index of the current core.
@@ -331,17 +286,20 @@ pub fn get_core_config() -> &'static cpu::CoreConfig {
 /// For any non-trivial use of the core index, interrupts must be disabled prior
 /// to calling to prevent the task from moving to another core.
 pub fn get_current_core_index() -> usize {
-  get_core_config().get_core_index(cpu::get_id()).unwrap()
+  get_device_tree()
+    .get_core_config()
+    .get_core_index(cpu::get_id())
+    .unwrap()
 }
 
-/// Get the memory layout configuration.
-///
-/// # Description
-///
-///   NOTE: The interface guarantees read-only access outside of the module and
-///         one-time initialization is assumed.
-pub fn get_memory_config() -> &'static MemoryConfig {
-  unsafe { ptr::addr_of!(MEMORY_CONFIG).as_ref().unwrap() }
+/// Get the page database virtual base address.
+pub fn get_page_database_virtual_base() -> usize {
+  unsafe { PAGE_DATABASE_VIRTUAL_BASE }
+}
+
+/// Get the size of the page database.
+pub fn get_page_database_size() -> usize {
+  PAGE_DATABASE_SIZE
 }
 
 /// Get the kernel configuration.
@@ -359,9 +317,14 @@ fn get_kernel_config() -> &'static KernelConfig {
 ///
 /// * `blob_vaddr` - The DTB blob virtual address.
 fn init_core_config(blob_vaddr: usize) {
-  unsafe {
-    assert!(dtb_cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
-  }
+  let core_config = unsafe {
+    ptr::addr_of_mut!(DEVICE_TREE)
+      .as_mut()
+      .unwrap()
+      .get_core_config_mut()
+  };
+
+  assert!(dtb_cpu::get_core_config(core_config, blob_vaddr));
 }
 
 /// Initialize the memory layout configuration.
@@ -383,8 +346,14 @@ fn init_core_config(blob_vaddr: usize) {
 /// Assumes the system is configured correctly and that there will not be any
 /// overflow when calculating end of the kernel or blob.
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
+  let mem_config = unsafe {
+    ptr::addr_of_mut!(DEVICE_TREE)
+      .as_mut()
+      .unwrap()
+      .get_memory_config_mut()
+  };
+
   let tagger = RangeZoneTagger::new(get_high_mem_base());
-  let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
   assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
 
   let kconfig = get_kernel_config();
@@ -423,19 +392,20 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 /// the TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
   // Calculate the base of the thread local area.
-  let core_count = get_core_config().get_core_count();
+  let device_tree = get_device_tree();
+  let core_count = device_tree.get_core_config().get_core_count();
   let section_size = get_section_size();
   let thread_local_size = section_size * core_count;
 
   unsafe {
     THREAD_LOCAL_VIRTUAL_BASE =
-      bits::align_down(PAGE_DIRECTORY_VIRTUAL_BASE - thread_local_size, section_size);
+      bits::align_down(PAGE_DATABASE_VIRTUAL_BASE - thread_local_size, section_size);
   }
 
   // The memory layout already excludes any physical memory beyond the kernel /
   // user split. However, we still need to mask off physical memory that cannot
   // be linearly mapped into the low memory area.
-  let mut low_mem = *get_memory_config();
+  let mut low_mem = *device_tree.get_memory_config();
   let high_mem_base = get_high_mem_base();
   let excl = range::Range::<MemoryZone> {
     tag: MemoryZone::InvalidZone,

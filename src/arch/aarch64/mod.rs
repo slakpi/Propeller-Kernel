@@ -4,11 +4,15 @@ mod exceptions;
 mod mm;
 
 pub mod task;
+#[cfg(feature = "module_tests")]
+pub mod tests;
 
-pub use super::arm_common::{cpu, memory, sync};
+pub use super::arm_common::{cpu, sync};
+pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
 use super::common::table_allocator::LinearTableAllocator;
+use crate::arch::device_tree::DeviceTree;
 use crate::support::{bits, dtb, range};
 use core::ptr;
 use memory::{MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone};
@@ -36,10 +40,10 @@ const PAGE_TABLE_ENTRY_SIZE: usize = 8;
 const PAGE_TABLE_ENTRY_SHIFT: usize = 3;
 
 /// The size of the virtual area reserved for the page directory (2 TiB).
-const PAGE_DIRECTORY_SIZE: usize = 0x200_0000_0000;
+const PAGE_DATABASE_SIZE: usize = 0x200_0000_0000;
 
 /// The base virtual address of the page directory.
-const PAGE_DIRECTORY_VIRTUAL_BASE: usize = 0xffff_fe00_0000_0000;
+const PAGE_DATABASE_VIRTUAL_BASE: usize = 0xffff_fe00_0000_0000;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -75,11 +79,8 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
   primary_stack_start: 0,
 };
 
-/// CPU core configuration.
-static mut CORE_CONFIG: cpu::CoreConfig = cpu::CoreConfig::new();
-
-/// Memory layout configuration.
-static mut MEMORY_CONFIG: MemoryConfig = MemoryConfig::new(MemoryZone::InvalidZone);
+/// System device tree.
+static mut DEVICE_TREE: DeviceTree = DeviceTree::new();
 
 /// Tags memory ranges with the appropriate zone.
 pub struct RangeZoneTagger {}
@@ -188,31 +189,64 @@ pub const fn get_page_table_entry_shift() -> usize {
   PAGE_TABLE_ENTRY_SHIFT
 }
 
-/// Get the full core configuration.
+/// Get the kernel base address.
 ///
 /// # Description
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
-pub fn get_core_config() -> &'static cpu::CoreConfig {
-  unsafe { ptr::addr_of!(CORE_CONFIG).as_ref().unwrap() }
+pub fn get_kernel_base() -> usize {
+  unsafe { KERNEL_CONFIG.kernel_base }
 }
 
-/// Get the memory layout configuration.
+/// Get the kernel virtual base address.
 ///
 /// # Description
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
-pub fn get_memory_config() -> &'static MemoryConfig {
-  unsafe { ptr::addr_of!(MEMORY_CONFIG).as_ref().unwrap() }
+pub fn get_kernel_virtual_base() -> usize {
+  unsafe { KERNEL_CONFIG.virtual_base }
+}
+
+/// Get the system device tree.
+///
+/// # Description
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+pub fn get_device_tree() -> &'static device_tree::DeviceTree {
+  unsafe { ptr::addr_of!(DEVICE_TREE).as_ref().unwrap() }
+}
+
+/// Get the core index of the current core.
+///
+/// # Description
+///
+/// For any non-trivial use of the core index, interrupts must be disabled prior
+/// to calling to prevent the task from moving to another core.
+pub fn get_current_core_index() -> usize {
+  get_device_tree()
+    .get_core_config()
+    .get_core_index(cpu::get_id())
+    .unwrap()
+}
+
+/// Get the page database virtual base address.
+pub fn get_page_database_virtual_base() -> usize {
+  PAGE_DATABASE_VIRTUAL_BASE
+}
+
+/// Get the page database size.
+pub fn get_page_database_size() -> usize {
+  PAGE_DATABASE_SIZE
 }
 
 /// Get the kernel configuration.
 ///
 /// # Description
 ///
-///   NOTE: Private to the ARM architecture.
+///   NOTE: Private to the AArch64 architecture.
 fn get_kernel_config() -> &'static KernelConfig {
   unsafe { ptr::addr_of!(KERNEL_CONFIG).as_ref().unwrap() }
 }
@@ -223,9 +257,14 @@ fn get_kernel_config() -> &'static KernelConfig {
 ///
 /// * `blob_vaddr` - The DTB blob virtual address.
 fn init_core_config(blob_vaddr: usize) {
-  unsafe {
-    assert!(dtb_cpu::get_core_config(ptr::addr_of_mut!(CORE_CONFIG).as_mut().unwrap(), blob_vaddr));
-  }
+  let core_config = unsafe {
+    ptr::addr_of_mut!(DEVICE_TREE)
+      .as_mut()
+      .unwrap()
+      .get_core_config_mut()
+  };
+
+  assert!(dtb_cpu::get_core_config(core_config, blob_vaddr));
 }
 
 /// Initialize the memory layout configuration.
@@ -247,8 +286,14 @@ fn init_core_config(blob_vaddr: usize) {
 /// Assumes the system is configured correctly and that there will not be any
 /// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
+  let mem_config = unsafe {
+    ptr::addr_of_mut!(DEVICE_TREE)
+      .as_mut()
+      .unwrap()
+      .get_memory_config_mut()
+  };
+
   let tagger = RangeZoneTagger {};
-  let mem_config = unsafe { ptr::addr_of_mut!(MEMORY_CONFIG).as_mut().unwrap() };
   assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
 
   let kconfig = get_kernel_config();
@@ -286,7 +331,7 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 /// Linearly maps the low memory area into the kernel page tables. Invalidating
 /// the TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
-  let mem_config = get_memory_config();
+  let mem_config = get_device_tree().get_memory_config();
 
   // Construct a linear allocator using the reserved kernel pages area. There
   // will be no more than three bootstrap tables, so start three pages in.

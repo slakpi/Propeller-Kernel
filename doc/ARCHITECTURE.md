@@ -1,17 +1,24 @@
 # PROPELLER KERNEL ARCHITECTURE
 
+* [`start` Module](#arch-start-module)
 * [`arch` Module](#arch-module)
   * [Module Interface](#arch-module-iface)
   * [ARM](#arm-arch-impl)
   * [AArch64](#aarch64-arch-impl)
 * [`mm` Module](#mm-module)
   * [Pager](#pager)
-  * [Page Directory](#page-directory)
+  * [Page Database](#page-directory)
   * [Buddy Allocator](#buddy-allocator)
 * [`support` Module](#support-module)
 * [`sync` Module](#sync-module)
 
-## `arch` Module
+## `start` Module {#arch-start-module}
+
+The `start` module contains the basic architecture assembly code to layout the kernel image, setup the initial page tables, setup exception handlers, etc. The `start` module also contains any code that has to be written in assembly. For example, code to get the current core identifier or set the current task pointer. These are written directly in assembly rather than Rust inline assembly to simplify debugging. The `arch` module provides Rust wrappers for any utilities written in assembly.
+
+The `start` module does not have a defined interface. Each architecture may implement its `start` module as needed to implement the `arch` interface.
+
+## `arch` Module {#arch-module}
 
 The `arch` module is an *interface* to architecture-specific Rust code. The module automatically includes the correct architecture code and exports it as the `arch` module.
 
@@ -19,79 +26,83 @@ The `arch` module is an *interface* to architecture-specific Rust code. The modu
 
 Each architecture supported by Propeller must implement the following public interface.
 
-#### `pub fn arch::init( config: usize )`
+#### `fn init( config: usize )`
 
 Performs single-threaded, architecture-specific kernel initialization. Typically, this will involve determining the amount of physical memory, setting up kernel page tables, setting up page allocators, etc.
 
-#### `pub fn arch::init_multi_core()`
+#### `fn init_multi_core()`
 
-Performs multi-threaded initialization. Any secondary cores will be running with interrupts disabled when this function returns. This must be called after `arch::init()`.
+Performs multi-threaded initialization. Any secondary cores will be running with interrupts disabled when this function returns. This must be called after `init()`.
 
-#### `pub fn get_memory_layout() -> &'static memory::MemoryConfig`
-
-Retrieves the physical memory layout. The layout must exclude any memory regions that cannot be used by the kernel, e.g. the kernel code itself, a DeviceTree, etc.
-
-#### `pub fn get_page_size() -> usize`
+#### `fn get_page_size() -> usize`
 
 Retrieves the page size.
 
-#### `pub fn get_page_shift() -> usize`
+#### `fn get_page_shift() -> usize`
 
 Retrieves the number of bits to shift an address right to calculate a physical Page Frame Number (PFN).
 
-#### `pub fn get_page_table_entry_size() -> usize`
+#### `fn get_page_mask() -> usize`
+
+Retrieves the address mask for a page offset.
+
+#### `fn get_section_size() -> usize`
+
+Retrieves the section size.
+
+#### `fn get_section_shift() -> usize`
+
+Retrieves the number of bits to shift an address right to calculate a physical section frame number.
+
+#### `fn get_section_mask() -> usize`
+
+Retrives the address mask for a section offset.
+
+#### `fn get_page_table_entry_size() -> usize`
 
 Retrieves the size of a page table entry.
 
-#### `pub fn get_page_table_entry_shift() -> usize`
+#### `fn get_page_table_entry_shift() -> usize`
 
 Retrieves the size of bits to shift an offset right to calculate a page table index.
 
-#### `pub fn get_kernel_base() -> usize`
+#### `fn get_kernel_base() -> usize`
 
 Retrieves the kernel's physical base address.
 
-#### `pub fn get_kernel_virtual_base() -> usize`
+#### `fn get_kernel_virtual_base() -> usize`
 
 Retrieves the kernel segment virtual base address.
 
-#### `pub fn get_max_physical_address() -> usize`
+#### `fn get_device_tree() -> &'static device_tree::DeviceTree`
 
-Retrieves the maximum physical address.
+Retrieves a reference to the system device tree.
 
-#### `pub fn get_core_count() -> usize`
+#### `fn get_current_core_index() -> usize`
 
-Retrieves the number of cores available on this node.
+Convenience interface to get the sequential index of the current core from the system device tree.
 
-#### `pub fn get_cpu_config() -> &'static cpu::CpuConfig`
+#### `fn get_page_database_virtual_base() -> usize`
 
-Retrieves architecture-independent CPU information.
+Retrieves the virtual address of the page database.
 
-#### `pub fn get_core_id() -> usize`
+#### `fn get_page_database_size() -> usize`
 
-Retrieves the identifier of the current core.
+Retrieves the size of the virtual area reserved for the page database in bytes.
 
-#### `pub fn get_page_directory_virtual_base() -> usize`
-
-Retrieves the virtual address of the page directory.
-
-#### `pub fn get_page_directory_virtual_size() -> usize`
-
-Retrieves the size of the virtual area reserved for the page directory in bytes.
-
-#### `pub fn spin_lock( lock_addr: usize )`
+#### `fn spin_lock( lock_addr: usize )`
 
 Low-level spin lock on the specified address.
 
-#### `pub fn try_spin_lock( lock_addr: usize ) -> bool`
+#### `fn try_spin_lock( lock_addr: usize ) -> bool`
 
 Attempt a low-level spin lock on the specified address.
 
-#### `pub fn spin_unlock( lock_addr: usize )`
+#### `fn spin_unlock( lock_addr: usize )`
 
 Low-level spin lock release on the specified address.
 
-#### `pub fn debug_print( args: fmt::Arguments )`
+#### `fn debug_print( args: fmt::Arguments )`
 
 Implements architecture-dependent debug output. For example, Propeller currently uses the ARM UART to send debug messages.
 
@@ -231,7 +242,7 @@ After initializing the core database, Propeller initializes a statically-allocat
 
 #### Memory Initialization
 
-#### Address Space {#arm-address-space}
+#### Address Space
 
 Propeller can use a canonical 32-bit 3/1 or 2/2 split configuration:
 
@@ -259,27 +270,27 @@ When using a 3/1 split configuration, Propeller creates a Low Memory area with a
     | / / / / / / / / | 56 KiB          |
     |.................| 0xffff_2000     |
     | Exception Stubs | 4 KiB           |
-    |.................| 0xffff_1000     |                  K
-    | Vectors         | 4 KiB           |                  E
-    |.................| 0xffff_0000     |                  R
-    | / / / / / / / / | 1,984 KiB       |                  N
-    |.................| 0xffe0_0000     |                  E
-    | Recursive Map   | 2 MiB           |                  L
-    |.................| 0xffc0_0000     +- High Memory
-    | Page Directory  | 32 MiB          |                  S
-    |.................| 0xfdc0_0000     |                  E
-    | Thread Local    |                 |                  G
-    |.................|                 |                  M
-    | ISR Stacks      |                 |                  E
-    |.................|                 |                  N
-    |                 |                 |                  T
-    | Hardware Area   |                 |
+    |.................| 0xffff_1000     |
+    | Vectors         | 4 KiB           |
+    |.................| 0xffff_0000     |    K
+    | / / / / / / / / | 1,984 KiB       |    E
+    |.................| 0xffe0_0000     |    R
+    | Recursive Map   | 2 MiB           |    N
+    |.................| 0xffc0_0000     |    E
+    | Page Database   | 24 MiB          |    L
+    |.................| 0xfe40_0000     |
+    | Thread Local    |                 |    S
+    |.................|                 |    E
+    | ISR Stacks      |                 |    G
+    |.................|                 |    M
+    |                 |                 |    E
+    | Hardware Area   |                 |    N
+    |                 |                 |    T
+    +-----------------+ 0xf800_0000     |
     |                 |                 |
-    +-----------------+ 0xf800_0000    -+
     |                 |                 |
-    |                 |                 |
-    | Fixed Mappings  | 896 MiB         +- Low Memory
-    |                 |                 |
+    | Fixed Mappings  | 896 MiB         |
+    | (Low Mem)       |                 |
     |                 |                 |
     +-----------------+ 0xc000_0000    -+
     |                 |
@@ -337,18 +348,20 @@ Consider the virtual address 0xffdf_e000:
 
 After the first recursion, bits [20:12] again select entry 510 in the Level 2 table, the core jumps back to the *same* Level 2 table, and translation stops. Bits [11:0] are now offsets into the same Level 2 table.
 
-##### Page Directory
+##### Page Database
 
-The 32 MiB Page Directory area is a virtually-contiguous array of page metadata entries. With 4 KiB pages, the 4 GiB address space has 1 Mi pages. 32 MiB allows for 32 bytes of metadata for each page.
+The 32 MiB Page Database area is a virtually-contiguous array of page metadata entries. With 4 KiB pages, the 3 GiB of addressable memory has 768 Ki pages. 24 MiB allows for 32 bytes of metadata for each page.
 
 Why 32 bytes? Will we need more? Great questions! Anyway...
 
-Similar to the Linux sparse virtual memory map model, this simplifies conversion from a page metadata address to a page physical address and vice versa. For 4 KiB pages:
+Similar to the Linux FLATMEM virtual memory map model, this simplifies conversion from a page metadata address to a page physical address and vice versa. For 4 KiB pages:
 
     Page Frame Number (PFN) = Physical Address >> 12
     Page Metadata Address   = ( PFN << 5 ) + 0xfdc0_0000
 
 The process is easily reversed to calculate a page physical address from a page metadata address.
+
+We are not worrying about NUMA architectures, just UMA. So, a model similar to the Linux SPARSEMEM model is not really necessary. This model is also similar to the Windows NT Page Frame Database circa 1990 per the Windows Research Kernel documents.
 
 ##### Thread Local Area
 
@@ -368,15 +381,15 @@ Threads store the physical address of their thread-local table in their context 
 
 ##### ISR Stacks
 
-The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 4 stacks per core, a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 768 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
+The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 4 stacks per core (SVC, ABT, IRQ, FIQ), a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 768 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
 
 ##### Hardware Area
 
-The remaining space in the kernel segment is available for memory-mapping hardware. For example, Propeller currently maps ARM SoC peripherals into this area. With the default ISR stack size of 2 pages, this area will be a minimum of 59 MiB. With only 4 cores and 2-page ISR stacks, it could be as large as 83 MiB.
+There is current nothing interesting going on here. Likely, Propeller will allow drivers to permanently map their devices into this area.
 
-#### Multi-Core Initialization {#arm-multi-core-init}
+#### Multi-Core Initialization
 
-See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init).
+See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference is that each ARM core will have SVC, ABT, IRQ, and FIQ entries in the kernel stack list. Otherwise, the concept is the same.
 
 ### AArch64 Implementation {#aarch64-arch-impl}
 
@@ -426,7 +439,7 @@ With the stack set, Propeller writes all zeros to the `.bss` section.
 
 Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
 
-#### Initial Page Tables {#aarch64-initial-page-tables}
+#### Initial Page Tables
 
 `__virtual_start` is a compile-time constant provided by the linker script specifying the virtual address base of the kernel.
 
@@ -502,15 +515,15 @@ After initializing the core database, Propeller initializes a statically-allocat
 
 Propeller uses the canonical 256 TiB arrangement for a 64-bit address space and allows up to just under 254 TiB of physical memory accessed through a fixed, linear mapping.
 
-    +-----------------+ 0xffff_ffff_ffff_ffff
-    | Page Directory  | 2 TiB                            K S
-    |.................| 0xffff_fe00_0000_0000            E E
-    | ISR Stacks      |                                  R G
-    |.................|                                  N M
-    |                 |                                  E E
-    | Fixed Mappings  |                                  L N
-    |                 |                                    T
-    +-----------------+ 0xffff_0000_0000_0000
+    +-----------------+ 0xffff_ffff_ffff_ffff    -+
+    | Page Database   | 2 TiB                     |    K S
+    |.................| 0xffff_fe00_0000_0000     |    E E
+    | ISR Stacks      |                           |    R G
+    |.................|                           |    N M
+    |                 |                           |    E E
+    | Fixed Mappings  |                           |    L N
+    |                 |                           |      T
+    +-----------------+ 0xffff_0000_0000_0000    -+
     | / / / / / / / / |
     | / / / / / / / / |
     | / / / / / / / / | 16,776,704 TiB (Unused)
@@ -522,20 +535,30 @@ Propeller uses the canonical 256 TiB arrangement for a 64-bit address space and 
     |                 |
     +-----------------+ 0x0000_0000_0000_0000
 
-The 2 TiB Page Directory area is a virtually-contiguous array of page metadata entries. With 4 KiB pages, the 256 TiB address space has 64 Gi pages. 2 TiB allows for 32 bytes of metadata for each page.
+##### Exception Vectors
+
+The exception vectors are part of the kernel image. Unlike ARM, AArch64 can set the vector table to an arbitrary address.
+
+##### Page Database
+
+The 2 TiB Page Database area is a virtually-contiguous array of page metadata entries. With 4 KiB pages, the 256 TiB address space has 64 Gi pages. 2 TiB allows for 32 bytes of metadata for each page.
 
 Why 32 bytes? Will we need more? Great questions! Anyway...
 
-Similar to the Linux sparse virtual memory map model, this simplifies conversion from a page metadata address to a page physical address and vice versa. For 4 KiB pages:
+Similar to the Linux FLATMEM virtual memory map model, this simplifies conversion from a page metadata address to a page physical address and vice versa. For 4 KiB pages:
 
     Page Frame Number (PFN) = Physical Address >> 12
     Page Metadata Address   = ( PFN << 5 ) + 0xffff_fffe_0000_0000
 
 The process is easily reversed to calculate a page physical address from a page metadata address.
 
-The ISR Stacks area virtually maps each core's ISR stack with unmapped guard pages in between each to trap stack overflows. With the maximum of 256 cores, a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 3 MiB with guard pages.
+We are not worrying about NUMA architectures, just UMA. So, a model similar to the Linux SPARSEMEM model is not really necessary. This model is also similar to the Windows NT Page Frame Database circa 1990 per the Windows Research Kernel documents.
 
-The exception vectors are part of the kernel image.
+Reserving 2 TiB at the top of the kernel segment means the actual maximum on addressable memory is roughly 254 TiB. "Roughly" because the ISR Stack Area grows with the number of cores, but to a very small degree compared to 2 TiB.
+
+##### ISR Stacks
+
+The ISR Stacks area virtually maps each core's ISR stack with unmapped guard pages in between each to trap stack overflows. With the maximum of 256 cores, a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 3 MiB with guard pages. As of 2023, Ampere Computing is starting to push single-node core counts to 384 cores ([2 sockets each with 192 cores][largecorcount]). Even if someone pushes to 1,024, that would still only be 12 MiB of stack space.
 
 #### Multi-Core Initialization {#aarch64-multi-core-init}
 
@@ -575,13 +598,13 @@ While the primary core's ISR stack is physically located in the kernel image, Pr
      | / / / / / Guard / / / / / |
      +---------------------------+  virtual base + stack_base
 
-### `mm` Module
+After the ISR stacks have been allocated and mapped, Propeller will unpark the secondary cores by vectoring them to `_secondary_start`. 
 
-#### Pager
+## `mm` Module
 
-#### Page Directory
+### Pager
 
-#### Buddy Allocator
+### Buddy Allocator
 
 Refer to [Buddy Allocator][buddyalloc].
 
@@ -611,9 +634,9 @@ During initialization, the buddy allocator embeds a linked list of free pages fo
 The checksum is a checksum of the next and previous pointers to sanity check the linked list when
 allocating a block of memory. Currently, the checksum is simply an XOR checksum. Specifically, `Random Seed ⊕ Next Pointer ⊕ Previous Pointer`.
 
-### `support` Module
+## `support` Module
 
-### `sync` Module
+## `sync` Module
 
 [armbootproto]: https://www.kernel.org/doc/Documentation/arm/booting.rst
 [aarch64bootproto]: https://www.kernel.org/doc/Documentation/arm64/booting.txt
@@ -623,3 +646,4 @@ allocating a block of memory. Currently, the checksum is simply an XOR checksum.
 [buddyalloc]: https://en.wikipedia.org/wiki/Buddy_memory_allocation
 [linuxhighmem]: https://docs.kernel.org/mm/highmem.html
 [recursivemap]: https://os.phil-opp.com/paging-implementation/#recursive-page-tables
+[largecorecount]: https://www.tomshardware.com/pc-components/cpus/yes-you-can-have-too-many-cores-amperes-192-core-cpus-break-arm64-linux-kernel-in-two-socket-systems-company-requests-higher-core-count-support-for-mainline-linux

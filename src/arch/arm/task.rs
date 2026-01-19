@@ -1,5 +1,8 @@
 //! ARM Task Management
 
+#[cfg(feature = "module_tests")]
+mod tests;
+
 use super::mm;
 use crate::arch::cpu;
 use crate::support::bits;
@@ -47,6 +50,59 @@ pub struct TaskContext {
 }
 
 impl TaskContext {
+  /// Get the virtual base address of a page table that maps a given virtual
+  /// address.
+  ///
+  /// # Parameters
+  ///
+  /// * `virt_addr` - A virtual address in the kernel's address space.
+  ///
+  /// # Description
+  ///
+  /// The Level 2 page table that serves the upper 1 GiB of the kernel's address
+  /// space has a recursive mapping to allow editing of itself and any Level 3
+  /// table entries.
+  ///
+  ///   NOTE: In a 2/2 split, the lower 1 GiB of the kernel's address space will
+  ///         always contain linear physical memory mappings and will never need
+  ///         to be modified after boot.
+  ///
+  ///   NOTE: Private to the ARM architecture
+  ///
+  /// # Returns
+  ///
+  /// The virtual address of the page table that maps a given virtual address or
+  /// None if the given virtual address is not in the upper 1 GiB of the kernel's
+  /// address space.
+  fn get_page_virtual_address_for_virtual_address(virt_addr: usize) -> Option<usize> {
+    // Only the upper 1 GiB of the kernel address space is served by the recursive
+    // map area.
+    if virt_addr < 0xc000_0000 {
+      return None;
+    }
+
+    let index = (virt_addr - 0xc000_0000) >> super::get_section_shift();
+    Some(super::RECURSIVE_MAP_AREA + (index << super::get_page_shift()))
+  }
+
+  /// Get the base virtual address of the thread local area for the current core.
+  ///
+  /// # Parameter
+  ///
+  /// * `core_idx` - The current core index.
+  ///
+  /// # Description
+  ///
+  ///   NOTE: The interface guarantees read-only access outside of the module and
+  ///         one-time initialization is assumed.
+  ///
+  ///   NOTE: Private to the ARM architecture.
+  fn get_thread_local_virtual_base(core_idx: usize) -> usize {
+    assert!(core_idx < super::get_device_tree().get_core_config().get_core_count());
+    let offset = core_idx << super::get_section_shift();
+    unsafe { super::THREAD_LOCAL_VIRTUAL_BASE + offset }
+  }
+
   /// Construct an empty task context.
   pub const fn default() -> Self {
     TaskContext {
@@ -144,8 +200,8 @@ impl TaskContext {
 
     // TODO: Interrupts may be re-enabled here; the rest is thread-safe.
 
-    let local_base = super::get_thread_local_virtual_base(core_idx);
-    let table_vaddr = super::get_page_virtual_address_for_virtual_address(local_base);
+    let local_base = Self::get_thread_local_virtual_base(core_idx);
+    let table_vaddr = Self::get_page_virtual_address_for_virtual_address(local_base);
     let table = unsafe { slice::from_raw_parts_mut(table_vaddr.unwrap() as *mut usize, 1024) };
     let page_vaddr = mm::map_page_local(table, local_base, page_addr, self.map_count, false);
 
@@ -164,8 +220,8 @@ impl TaskContext {
       return;
     }
 
-    let local_base = super::get_thread_local_virtual_base(super::get_current_core_index());
-    let table_vaddr = super::get_page_virtual_address_for_virtual_address(local_base);
+    let local_base = Self::get_thread_local_virtual_base(super::get_current_core_index());
+    let table_vaddr = Self::get_page_virtual_address_for_virtual_address(local_base);
     let table = unsafe { slice::from_raw_parts_mut(table_vaddr.unwrap() as *mut usize, 1024) };
 
     mm::unmap_page_local(table, local_base, self.map_count);
@@ -203,7 +259,7 @@ pub fn init_bootstrap_context() -> TaskContext {
   // current core's table slot.
   mm::map_thread_local_table(
     super::get_kernel_config().kernel_pages_start,
-    super::get_thread_local_virtual_base(super::get_current_core_index()),
+    TaskContext::get_thread_local_virtual_base(super::get_current_core_index()),
     table_addr,
   );
 
@@ -224,4 +280,9 @@ pub fn get_current_task_addr() -> usize {
 /// * `addr` - The new task address.
 pub fn set_current_task_addr(addr: usize) {
   unsafe { task_set_current_task_addr(addr) }
+}
+
+#[cfg(feature = "module_tests")]
+pub fn run_tests() {
+  tests::run_local_mapping_tests();
 }

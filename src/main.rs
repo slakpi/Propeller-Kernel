@@ -33,10 +33,18 @@ fn panic(_info: &PanicInfo) -> ! {
 extern "C" fn pk_init(config: usize) {
   arch::init(config);
   task::init();
+
+  #[cfg(feature = "module_tests")]
+  run_module_tests();
 }
 
 /// Scheduler entry point.
 #[unsafe(no_mangle)]
 extern "C" fn pk_scheduler() -> ! {
   arch::cpu::halt();
+}
+
+#[cfg(feature = "module_tests")]
+fn run_module_tests() {
+  arch::tests::run_tests();
 }

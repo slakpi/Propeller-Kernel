@@ -78,7 +78,7 @@ _start:
 ///
 ///   NOTE: The Linux boot protocol for ARM specifies that the bootloader may
 ///         leave the primary core in either hypervisor or supervisor mode.
-///         Hypervisor mode is preferred if the core support virtualization.
+///         Hypervisor mode is preferred if the core supports virtualization.
 .global _secondary_start
 _secondary_start:
 // Ensure the core is in SVC mode.

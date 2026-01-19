@@ -1,5 +1,8 @@
 //! AArch64 Task Management
 
+#[cfg(feature = "module_tests")]
+mod tests;
+
 use crate::arch::cpu;
 
 unsafe extern "C" {
@@ -121,4 +124,9 @@ pub fn get_current_task_addr() -> usize {
 /// * `addr` - The new task address.
 pub fn set_current_task_addr(addr: usize) {
   unsafe { task_set_current_task_addr(addr) }
+}
+
+#[cfg(feature = "module_tests")]
+pub fn run_tests() {
+  tests::run_local_mapping_tests();
 }

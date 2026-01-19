@@ -6,5 +6,4 @@
 pub mod cpu;
 pub mod dtb_cpu;
 pub mod dtb_memory;
-pub mod memory;
 pub mod sync;
