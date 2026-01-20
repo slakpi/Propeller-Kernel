@@ -1,7 +1,6 @@
 //! AArch64 Memory Management
 
-use crate::arch::common::table_allocator::TableAllocator;
-use crate::arch::memory::MappingStrategy;
+use crate::arch::memory::{MappingStrategy, PageAllocator};
 use crate::support::bits;
 use core::{cmp, ptr, slice};
 
@@ -72,7 +71,7 @@ pub fn direct_map_memory(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
   fill_table(
@@ -112,7 +111,7 @@ pub fn map_memory(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
   fill_table(
@@ -149,7 +148,7 @@ fn fill_table(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
   match strategy {
@@ -209,7 +208,7 @@ fn fill_table_compact(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
 ) {
   let page_size = super::get_page_size();
 
@@ -285,7 +284,7 @@ fn fill_table_granular(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
 ) {
   let page_size = super::get_page_size();
 
@@ -571,7 +570,7 @@ fn alloc_table_and_fill(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) -> usize {
   let next_level = get_next_table(table_level).unwrap();
@@ -583,7 +582,8 @@ fn alloc_table_and_fill(
   //       wrong and an exception is the right outcome if the configuration is
   //       invalid.
   if !is_pointer_entry(table_level, desc) {
-    next_addr = allocator.alloc_table().unwrap();
+    // Let an assert occur if we cannot allocate a table from linear memory.
+    next_addr = allocator.alloc().unwrap();
 
     unsafe {
       // Zero out the table. Any entry in the table with 0 in bit 0 is invalid.

@@ -4,6 +4,7 @@
 mod tests;
 
 use crate::arch::cpu;
+use crate::support::bits;
 
 unsafe extern "C" {
   fn task_get_current_task_addr() -> usize;
@@ -12,7 +13,7 @@ unsafe extern "C" {
 
 const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + usize::BITS as usize - 1) / usize::BITS as usize;
 
-pub type AffinityMask = [usize; CPU_MASK_WORDS];
+pub type AffinityMask = bits::Bitmap<CPU_MASK_WORDS>;
 
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
@@ -64,7 +65,7 @@ impl TaskContext {
   }
 
   /// Get the current pin mask.
-  pub fn get_pin_mask(&self) -> Option<AffinityMask> {
+  pub fn get_pin_mask(&self) -> Option<&AffinityMask> {
     None
   }
 
@@ -85,7 +86,7 @@ impl TaskContext {
   ///
   /// The virtual address of the mapped page.
   pub fn map_page(&mut self, page_addr: usize) -> usize {
-    super::get_kernel_config().virtual_base + page_addr
+    super::get_kernel_virtual_base() + page_addr
   }
 
   /// See `Task::unmap_page()`.

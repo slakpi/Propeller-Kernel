@@ -113,3 +113,38 @@ pub const fn compact_odd_bits(n: usize) -> usize {
 pub const fn compact_even_bits(n: usize) -> usize {
   compact_odd_bits(n >> 1)
 }
+
+/// Interleaves the lower 16-bit bits of two numbers.
+///
+/// # Parameters
+///
+/// * `a` - The first number.
+/// * `b` - The second number.
+///
+/// # Description
+///
+/// Given 0xxxxx_aaaa and 0xxxxx_bbbb where `x` is ignored, the result is
+/// 0xbaba_baba.
+///
+/// # Returns
+///
+/// The interleaved bits.
+pub const fn interleave_bits(a: usize, b: usize) -> usize {
+  const B: [usize; 4] = [0x5555_5555, 0x3333_3333, 0x0f0f_0f0f, 0x00ff_00ff];
+  const S: [usize; 4] = [1, 2, 4, 8];
+
+  let mut x = a;
+  let mut y = b;
+
+  x = (x | (x << S[3])) & B[3];
+  x = (x | (x << S[2])) & B[2];
+  x = (x | (x << S[1])) & B[1];
+  x = (x | (x << S[0])) & B[0];
+
+  y = (y | (y << S[3])) & B[3];
+  y = (y | (y << S[2])) & B[2];
+  y = (y | (y << S[1])) & B[1];
+  y = (y | (y << S[0])) & B[0];
+
+  x | (y << 1)
+}

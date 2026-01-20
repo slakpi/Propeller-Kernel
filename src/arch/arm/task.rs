@@ -5,6 +5,7 @@ mod tests;
 
 use super::mm;
 use crate::arch::cpu;
+use crate::arch::cpu::MAX_CORES;
 use crate::support::bits;
 use core::{ptr, slice};
 
@@ -13,9 +14,9 @@ unsafe extern "C" {
   fn task_set_current_task_addr(task: usize);
 }
 
-const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + usize::BITS as usize - 1) / usize::BITS as usize;
+const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + bits::WORD_BITS - 1) >> bits::WORD_BIT_SHIFT;
 
-pub type AffinityMask = [usize; CPU_MASK_WORDS];
+pub type AffinityMask = bits::Bitmap<CPU_MASK_WORDS>;
 
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
@@ -133,8 +134,8 @@ impl TaskContext {
   }
 
   /// Get the current pin mask.
-  pub fn get_pin_mask(&self) -> Option<AffinityMask> {
-    self.pin_mask
+  pub fn get_pin_mask(&self) -> Option<&AffinityMask> {
+    self.pin_mask.as_ref()
   }
 
   /// Maps a page into the kernel's virtual address space using the thread-local
@@ -148,10 +149,10 @@ impl TaskContext {
   ///
   /// See `Task::map_page()`.
   ///
-  /// If the page is in low memory, the function adds a null entry to the local
-  /// mapping table and returns the virtual address of the linearly mapped page.
-  /// This means that pages in low memory still count toward the number of local
-  /// mappings a task is maintaining.
+  /// If the page is in linear memory, the function adds a null entry to the
+  /// local mapping table and returns the virtual address of the linearly mapped
+  /// page. This means that pages in linear memory still count toward the number
+  /// of local mappings a task is maintaining.
   ///
   ///   NOTE: This is done to simplify the unmapping logic which does not take
   ///         an address parameter.
@@ -177,9 +178,9 @@ impl TaskContext {
   ///
   /// The virtual address of the mapped page.
   pub fn map_page(&mut self, page_addr: usize) -> usize {
-    // If mapping a page in low memory, return the linearly mapped address and
-    // increment the map count. We do not need to pin the process to the current
-    // core.
+    // If mapping a page in linear memory, return the linearly mapped address
+    // and increment the map count. We do not need to pin the process to the
+    // current core.
     if page_addr < super::get_high_mem_base() {
       self.map_count += 1;
       return super::get_kernel_virtual_base() + page_addr;
@@ -193,8 +194,8 @@ impl TaskContext {
     // Pin the core to the current core if not already pinned. If already
     // pinned, we should be on the same core.
     if self.pin_mask.is_none() {
-      let mut pin_mask = AffinityMask::default();
-      bits::set_bit(&mut pin_mask, core_idx);
+      let mut pin_mask = AffinityMask::new(MAX_CORES);
+      pin_mask.set_bit(core_idx);
       self.pin_mask = Some(pin_mask);
     }
 
@@ -251,8 +252,8 @@ pub fn init_bootstrap_context() -> TaskContext {
   // Set up the bootstrap local mapping table.
   //
   //   NOTE: The bootstrap task's local mapping table is part of the kernel
-  //         image in low memory. It is safe to just subtract the virtual base
-  //         to get the physical address.
+  //         image in linear memory. It is safe to just subtract the virtual
+  //         base to get the physical address.
   let table_addr = table_vaddr - super::get_kernel_virtual_base();
 
   // Map the task's local mapping table into the kernel address space using the

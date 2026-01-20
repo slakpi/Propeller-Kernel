@@ -11,6 +11,8 @@ mod mm;
 mod support;
 mod sync;
 mod task;
+#[cfg(feature = "module_tests")]
+mod test;
 
 use core::panic::PanicInfo;
 
@@ -31,11 +33,17 @@ fn panic(_info: &PanicInfo) -> ! {
 /// * `config` - Pointer to the architecture configuration struct.
 #[unsafe(no_mangle)]
 extern "C" fn pk_init(config: usize) {
+  // Single-threaded initialization.
   arch::init(config);
   task::init();
+  mm::init();
 
+  // Run module tests single-threaded.
   #[cfg(feature = "module_tests")]
   run_module_tests();
+
+  // Bring up any secondary cores.
+  arch::init_smp(mm::get_current_core_linear_allocator());
 }
 
 /// Scheduler entry point.
@@ -46,5 +54,9 @@ extern "C" fn pk_scheduler() -> ! {
 
 #[cfg(feature = "module_tests")]
 fn run_module_tests() {
-  arch::tests::run_tests();
+  let mut context = test::TestContext::new();
+  arch::run_tests(&mut context);
+  mm::run_tests(&mut context);
+  support::bits::run_tests(&mut context);
+  assert_eq!(context.fail_count, 0);
 }

@@ -4,18 +4,19 @@ mod exceptions;
 mod mm;
 
 pub mod task;
-#[cfg(feature = "module_tests")]
-pub mod tests;
 
 pub use super::arm_common::{cpu, sync};
 pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
-use super::common::table_allocator::LinearTableAllocator;
-use crate::arch::device_tree::DeviceTree;
 use crate::support::{bits, dtb, range};
+#[cfg(feature = "module_tests")]
+use crate::test;
 use core::ptr;
-use memory::{MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone};
+use memory::{
+  BlockAllocator, BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange,
+  MemoryRangeHandler, MemoryZone,
+};
 
 unsafe extern "C" {
   fn _secondary_start();
@@ -80,7 +81,7 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 };
 
 /// System device tree.
-static mut DEVICE_TREE: DeviceTree = DeviceTree::new();
+static mut DEVICE_TREE: device_tree::DeviceTree = device_tree::DeviceTree::new();
 
 /// Tags memory ranges with the appropriate zone.
 pub struct RangeZoneTagger {}
@@ -90,10 +91,10 @@ impl MemoryRangeHandler for RangeZoneTagger {
   ///
   /// # Description
   ///
-  /// All memory in an 64-bit platform is low memory.
+  /// All memory in an 64-bit platform is linear memory.
   fn handle_range(&self, config: &mut MemoryConfig, base: usize, size: usize) {
     config.insert_range(MemoryRange {
-      tag: MemoryZone::LowMemoryZone,
+      tag: MemoryZone::LinearMemoryZone,
       base,
       size,
     });
@@ -149,6 +150,8 @@ pub fn init(config_addr: usize) {
   init_direct_map();
 }
 
+pub fn init_smp(allocator: &mut impl BlockAllocator) {}
+
 /// Get the size of a page.
 pub const fn get_page_size() -> usize {
   PAGE_SIZE
@@ -197,6 +200,18 @@ pub const fn get_page_table_entry_shift() -> usize {
 ///         one-time initialization is assumed.
 pub fn get_kernel_base() -> usize {
   unsafe { KERNEL_CONFIG.kernel_base }
+}
+
+/// Get the maximum physical address.
+///
+/// # Description
+///
+/// The maximum physical address is just the bitwise negation of the kernel's
+/// base physical address. For example, if the kernel starts at
+/// 0xffff_0000_0000_0000, the maximum physical address is
+/// 0x0000_ffff_ffff_ffff.
+pub fn get_maximum_physical_address() -> usize {
+  !crate::arch::get_kernel_base()
 }
 
 /// Get the kernel virtual base address.
@@ -328,16 +343,17 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 ///
 /// # Description
 ///
-/// Linearly maps the low memory area into the kernel page tables. Invalidating
-/// the TLB is not required here. We are only adding new entries at this point.
+/// Linearly maps physical memory into the kernel page tables. Invalidating the
+/// TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
   let mem_config = get_device_tree().get_memory_config();
 
-  // Construct a linear allocator using the reserved kernel pages area. There
-  // will be no more than three bootstrap tables, so start three pages in.
+  // Construct a buffered, linear allocator using the reserved kernel pages
+  // area. There will be no more than three bootstrap tables, so start three
+  // pages in. Only 16 pages are reserved, so one 64-bit word is enough.
   let kconfig = get_kernel_config();
   let offset = 3 * get_page_size();
-  let mut allocator = LinearTableAllocator::new(
+  let mut allocator = BufferedPageAllocator::<1>::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
     get_page_size(),
@@ -354,4 +370,9 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
+}
+
+#[cfg(feature = "module_tests")]
+pub fn run_tests(context: &mut test::TestContext) {
+  task::run_tests();
 }

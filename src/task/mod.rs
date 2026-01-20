@@ -68,10 +68,10 @@ impl Task {
   }
 
   /// The task's core affinity mask.
-  pub fn get_affinity(&self) -> Option<AffinityMask> {
+  pub fn get_affinity(&self) -> Option<&AffinityMask> {
     match self.context.get_pin_mask() {
       Some(pin_mask) => Some(pin_mask),
-      None => self.affinity,
+      None => self.affinity.as_ref(),
     }
   }
 
@@ -80,8 +80,12 @@ impl Task {
   /// # Parameters
   ///
   /// * `affinity` - The new affinity mask or None to allow running on any core.
-  pub fn set_affinity(&mut self, affinity: Option<AffinityMask>) {
-    self.affinity = affinity;
+  pub fn set_affinity(&mut self, affinity: Option<&AffinityMask>) {
+    if let Some(affinity) = affinity {
+      self.affinity = Some(*affinity);
+    } else {
+      self.affinity = None;
+    }
   }
 
   /// Get a reference to the task's architecture-dependent context.

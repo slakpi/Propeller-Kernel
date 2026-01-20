@@ -28,6 +28,11 @@ where
     }
   }
 
+  /// Clear the range set.
+  pub fn clear(&mut self) {
+    self.count = 0;
+  }
+
   /// Check if the set is empty.
   pub fn is_empty(&self) -> bool {
     self.count == 0

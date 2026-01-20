@@ -1,7 +1,6 @@
 //! ARM Memory Management
 
-use crate::arch::common::table_allocator::TableAllocator;
-use crate::arch::memory::MappingStrategy;
+use crate::arch::memory::{MappingStrategy, PageAllocator};
 use crate::support::bits;
 use core::{cmp, ptr, slice};
 
@@ -86,15 +85,15 @@ enum TableLevel {
 ///
 /// # Assumptions
 ///
-/// * The physical address of the starting page table is in low memory.
-/// * The allocator *must* allocate pages in low memory.
+/// * The physical address of the starting page table is in linear memory.
+/// * The allocator *must* allocate pages in linear memory.
 pub fn direct_map_memory(
   virtual_base: usize,
   pages_start: usize,
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
   let virt = virtual_base + base;
@@ -132,8 +131,8 @@ pub fn direct_map_memory(
 ///
 /// # Assumptions
 ///
-/// * The physical address of the starting page table is in low memory.
-/// * The allocator *must* allocate pages in low memory.
+/// * The physical address of the starting page table is in linear memory.
+/// * The allocator *must* allocate pages in linear memory.
 pub fn map_memory(
   virtual_base: usize,
   pages_start: usize,
@@ -141,7 +140,7 @@ pub fn map_memory(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
   fill_table(
@@ -176,7 +175,7 @@ pub fn map_memory(
 ///
 /// # Assumptions
 ///
-/// The Level 1 and Level 2 page tables are in low memory.
+/// The Level 1 and Level 2 page tables are in linear memory.
 pub fn map_thread_local_table(pages_start: usize, local_virt: usize, table_addr: usize) {
   let virtual_base = super::get_kernel_virtual_base();
   let start_level = get_first_table_level(virtual_base, local_virt);
@@ -257,7 +256,7 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
 
   let idx = (count - 1) << 1;
 
-  // A null entry is a placeholder for a local mapping that is in low memory.
+  // A null entry is a placeholder for a local mapping that is in linear memory.
   if table[idx] == 0 {
     return;
   }
@@ -318,7 +317,7 @@ fn fill_table(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
   match strategy {
@@ -398,7 +397,7 @@ fn fill_table_compact(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
 ) {
   let page_size = super::get_page_size();
   let section_size = super::get_section_size();
@@ -481,7 +480,7 @@ fn fill_table_granular(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
 ) {
   let page_size = super::get_page_size();
 
@@ -814,7 +813,7 @@ fn alloc_table_and_fill(
   base: usize,
   size: usize,
   device: bool,
-  allocator: &mut impl TableAllocator,
+  allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) -> (usize, usize) {
   let next_level = get_next_table(table_level).unwrap();
@@ -827,8 +826,8 @@ fn alloc_table_and_fill(
   //       wrong and an exception is the right outcome if the configuration is
   //       invalid.
   if !is_pointer_entry(table_level, desc, desc_high) {
-    // Let an assert occur if we cannot allocate a table.
-    next_addr = allocator.alloc_table().unwrap();
+    // Let an assert occur if we cannot allocate a table from linear memory.
+    next_addr = allocator.alloc().unwrap();
 
     unsafe {
       // Zero out the table. Any entry in the table with bits 0 and 1 set to 0

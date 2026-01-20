@@ -4,17 +4,19 @@ mod exceptions;
 mod mm;
 
 pub mod task;
-#[cfg(feature = "module_tests")]
-pub mod tests;
 
 pub use super::arm_common::{cpu, sync};
 pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
-use super::common::table_allocator::LinearTableAllocator;
 use crate::support::{bits, dtb, range};
+#[cfg(feature = "module_tests")]
+use crate::test;
 use core::ptr;
-use memory::{MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone};
+use memory::{
+  BlockAllocator, BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange,
+  MemoryRangeHandler, MemoryZone,
+};
 
 unsafe extern "C" {
   fn _secondary_start();
@@ -129,7 +131,7 @@ impl MemoryRangeHandler for RangeZoneTagger {
 
     if let Some(rl) = rl {
       config.insert_range(MemoryRange {
-        tag: MemoryZone::LowMemoryZone,
+        tag: MemoryZone::LinearMemoryZone,
         base: rl.base,
         size: rl.size,
       });
@@ -200,6 +202,8 @@ pub fn init(config_addr: usize) {
   init_direct_map();
 }
 
+pub fn init_smp(allocator: &mut impl BlockAllocator) {}
+
 /// Get the size of a page.
 pub const fn get_page_size() -> usize {
   PAGE_SIZE
@@ -248,6 +252,17 @@ pub const fn get_page_table_entry_shift() -> usize {
 ///         one-time initialization is assumed.
 pub fn get_kernel_base() -> usize {
   unsafe { KERNEL_CONFIG.kernel_base }
+}
+
+/// Get the maximum physical address.
+///
+/// # Description
+///
+/// The maximum physical address is just the bitwise negation of the kernel's
+/// base physical address. For example, with a 3/1 split, the kernel starts at
+/// 0xc000_0000 and the maximum physical address is 0x3fff_ffff.
+pub fn get_maximum_physical_address() -> usize {
+  !get_kernel_base()
 }
 
 /// Get the kernel virtual base address.
@@ -388,8 +403,8 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 ///
 /// # Description
 ///
-/// Linearly maps the low memory area into the kernel page tables. Invalidating
-/// the TLB is not required here. We are only adding new entries at this point.
+/// Linearly maps physical memory into the kernel page tables. Invalidating the
+/// TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
   // Calculate the base of the thread local area.
   let device_tree = get_device_tree();
@@ -404,8 +419,8 @@ fn init_direct_map() {
 
   // The memory layout already excludes any physical memory beyond the kernel /
   // user split. However, we still need to mask off physical memory that cannot
-  // be linearly mapped into the low memory area.
-  let mut low_mem = *device_tree.get_memory_config();
+  // be linearly mapped.
+  let mut linear_mem = *device_tree.get_memory_config();
   let high_mem_base = get_high_mem_base();
   let excl = range::Range::<MemoryZone> {
     tag: MemoryZone::InvalidZone,
@@ -413,19 +428,20 @@ fn init_direct_map() {
     size: usize::MAX - high_mem_base + 1,
   };
 
-  low_mem.exclude_range(&excl);
+  linear_mem.exclude_range(&excl);
 
-  // Construct a linear allocator using the reserved kernel pages area. There
-  // will be no more than three bootstrap tables, so start three pages in.
+  // Construct a buffered, linear allocator using the reserved kernel pages
+  // area. There will be no more than three bootstrap tables, so start three
+  // pages in. Only 16 pages are reserved, so one 32-bit word is enough.
   let kconfig = get_kernel_config();
   let offset = 3 * kconfig.page_size;
-  let mut allocator = LinearTableAllocator::new(
+  let mut allocator = BufferedPageAllocator::<1>::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
     get_page_size(),
   );
 
-  for range in low_mem.get_ranges() {
+  for range in linear_mem.get_ranges() {
     mm::direct_map_memory(
       kconfig.virtual_base,
       kconfig.kernel_pages_start,
@@ -436,4 +452,9 @@ fn init_direct_map() {
       MappingStrategy::Compact,
     );
   }
+}
+
+#[cfg(feature = "module_tests")]
+pub fn run_tests(context: &mut test::TestContext) {
+  task::run_tests();
 }

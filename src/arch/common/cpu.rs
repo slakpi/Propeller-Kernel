@@ -4,8 +4,7 @@ use crate::support::{hash, hash_map};
 
 /// 32-bit builds are limited to 16 cores. Thread-local page mapping requires
 /// each core to reserve a 2 MiB block in the kernel's address space. Limiting
-/// the number of cores prevents the Thread Local area from overflowing into the
-/// Low Memory area.
+/// the number of cores keeps the Thread Local area to a reasonable size.
 #[cfg(target_pointer_width = "64")]
 pub const MAX_CORES: usize = 256;
 #[cfg(target_pointer_width = "32")]

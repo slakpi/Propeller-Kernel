@@ -7,4 +7,3 @@ pub mod bits;
 pub mod cpu;
 pub mod device_tree;
 pub mod memory;
-pub mod table_allocator;

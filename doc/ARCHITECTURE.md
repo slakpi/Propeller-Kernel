@@ -14,7 +14,7 @@
 
 ## `start` Module {#arch-start-module}
 
-The `start` module contains the basic architecture assembly code to layout the kernel image, setup the initial page tables, setup exception handlers, etc. The `start` module also contains any code that has to be written in assembly. For example, code to get the current core identifier or set the current task pointer. These are written directly in assembly rather than Rust inline assembly to simplify debugging. The `arch` module provides Rust wrappers for any utilities written in assembly.
+The `start` module contains the basic architecture assembly code to lay out the kernel image, set up the initial page tables, setup exception handlers, etc. The `start` module also contains any code that has to be written in assembly. For example, code to get the current core identifier or set the current task pointer. These are written directly in assembly rather than Rust inline assembly to simplify debugging. The `arch` module provides Rust wrappers for any utilities written in assembly.
 
 The `start` module does not have a defined interface. Each architecture may implement its `start` module as needed to implement the `arch` interface.
 
@@ -32,7 +32,7 @@ Performs single-threaded, architecture-specific kernel initialization. Typically
 
 #### `fn init_multi_core()`
 
-Performs multi-threaded initialization. Any secondary cores will be running with interrupts disabled when this function returns. This must be called after `init()`.
+Performs multithreaded initialization. Any secondary cores will be running with interrupts disabled when this function returns. This must be called after `init()`.
 
 #### `fn get_page_size() -> usize`
 
@@ -56,7 +56,7 @@ Retrieves the number of bits to shift an address right to calculate a physical s
 
 #### `fn get_section_mask() -> usize`
 
-Retrives the address mask for a section offset.
+Retries the address mask for a section offset.
 
 #### `fn get_page_table_entry_size() -> usize`
 
@@ -69,6 +69,10 @@ Retrieves the size of bits to shift an offset right to calculate a page table in
 #### `fn get_kernel_base() -> usize`
 
 Retrieves the kernel's physical base address.
+
+#### `fn get_max_physical_address() -> usize`
+
+Retrieves the maximum physical address. The maximum physical address is just the bitwise negation of the kernel's base physical address. For example, with 32-bit build and a 3/1 split, the kernel starts at 0xc000_0000 and the maximum physical address is 0x3fff_ffff. With a 64-bit build and the kernel starting at 0xffff_0000_0000_0000, the maximum physical address is 0x0000_ffff_ffff_ffff.
 
 #### `fn get_kernel_virtual_base() -> usize`
 
@@ -152,13 +156,13 @@ The base of the `.text` segment is specified by the compile-time constant `__ker
 
 The stack pointer table is a single page of 1024 4-byte pointer entries. 1024 entries is sufficient for the 256 core maximum on ARM nodes. See [Multi-Core Initialization](#arm-multi-core-init).
 
-`.text.vectors` and `.text.stubs` are the exception vectors and stubs. The kernels maps these to the high vector addresses, 0xffff_0000 and 0xffff_1000 respectively.
+`.text.vectors` and `.text.stubs` are the exception vectors and stubs. The kernel maps these to the high vector addresses, 0xffff_0000 and 0xffff_1000 respectively.
 
 `.data.id_pages` and `.data.pages` are blocks reserved for the [initial kernel page tables](#arm-initial-page-tables). The kernel requires Large Physical Address Extensions and reserves three pages for each LPAE table.
 
 #### Operating Mode
 
-The boot loader will have already put the primary core into SVC or HYP. On startup, Propeller ensures the primary core is in SVC before performing startup tasks. If the primary core is in an unexpected mode initially, Propeller halts.
+The bootloader will have already put the primary core into SVC or HYP. On startup, Propeller ensures the primary core is in SVC before performing startup tasks. If the primary core is in an unexpected mode initially, Propeller halts.
 
 #### Basic Startup
 
@@ -166,7 +170,7 @@ Once in SVC on the primary core, Propeller sets the primary core's `SP_svc` poin
 
 With the stack set, Propeller writes all zeros to the `.bss` section.
 
-Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
+Next, Propeller checks if the blob provided by the bootloader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
 
 #### Initial Page Tables {#arm-initial-page-tables}
 
@@ -238,7 +242,7 @@ Propeller scans the DTB for a list of logical cores and their thread IDs. Propel
 
 ARM builds of Propeller are limited to [16 cores](#thread-local-area), and will only add the first 16 cores it encounters in the DTB to the core database.
 
-After initializing the core database, Propeller initializes a statically-allocated task structure called the Bootstrap Task and provides the Bootstrap Task with a statically-allocated page table for local mappings. This Bootstrap Task represents the single-thread boot code and allows mapping the High Memory area to setup the allocator data structures before going multi-threaded. Once single-threaded initialization has completed, the Bootstrap Task will be replaced by the real Init Task.
+After initializing the core database, Propeller initializes a statically-allocated task structure called the Bootstrap Task and provides the Bootstrap Task with a statically-allocated page table for local mappings. This Bootstrap Task represents the single-thread boot code and allows mapping the High Memory area to set up the allocator data structures before going multithreaded. Once single-threaded initialization has completed, the Bootstrap Task will be replaced by the real Init Task.
 
 #### Memory Initialization
 
@@ -264,7 +268,7 @@ Not all ARM CPUs support the Large Physical Address Extensions required for the 
 
 The split is a balance of available physical memory versus speed. The ARM supports AArch64 and should run a 64-bit build of Propeller if it has more than 2 GiB of memory. With less than 2 GiB, a 2/2 is the most performant option. When using a 3/1 split with more than 1 GiB of memory, Propeller will use the [Linux High Memory Handling][linuxhighmem] method of per-thread temporary memory mapping to access memory beyond 896 MiB in the kernel.
 
-When using a 3/1 split configuration, Propeller creates a Low Memory area with a fixed, linear mapping to the first 896 MiB of physical memory starting at the kernel segment's base address.
+When using a 3/1 split configuration, Propeller creates a Linear Memory area with a fixed, linear mapping to the first 896 MiB of physical memory starting at the kernel segment's base address.
 
     +-----------------+ 0xffff_ffff    -+
     | / / / / / / / / | 56 KiB          |
@@ -289,8 +293,8 @@ When using a 3/1 split configuration, Propeller creates a Low Memory area with a
     +-----------------+ 0xf800_0000     |
     |                 |                 |
     |                 |                 |
-    | Fixed Mappings  | 896 MiB         |
-    | (Low Mem)       |                 |
+    | Linear Mappings | 896 MiB         |
+    |                 |                 |
     |                 |                 |
     +-----------------+ 0xc000_0000    -+
     |                 |
@@ -308,11 +312,11 @@ Propeller configures ARM cores to place exception vectors at 0xffff_0000 and pla
 
 ##### Recursive Map Area
 
-The Recursive Map area provides access to the page tables that map the upper 1 GiB of the kernel's address space. With a 3/1 split, this will be all of the kernel's page tables. With a 2/2 split, the page tables that map the lower 1 GiB of the kernel's address space will not be accessible through the Recursive Map area.
+The Recursive Map area provides access to the page tables that map the upper 1 GiB of the kernel's address space. With a 3/1 split, this will be all the kernel's page tables. With a 2/2 split, the page tables that map the lower 1 GiB of the kernel's address space will not be accessible through the Recursive Map area.
 
 Refer to [Recursive Page Tables][recursivemap].
 
-An example Level 2 table that covers the upper 1 GiB of the kernel's address space is setup as follows:
+An example Level 2 table that covers the upper 1 GiB of the kernel's address space is set up as follows:
 
     +----------------------------------+
     | Level 2 Table 0xaaaa_0000        |
@@ -365,7 +369,7 @@ We are not worrying about NUMA architectures, just UMA. So, a model similar to t
 
 ##### Thread Local Area
 
-The Thread Local area is reserved for mapping per-thread page tables that map upper memory beyond the linear mappings. Each kernel thread has its own Level 3 page table that is mapped when activating the thread and allows the thread to temporarily map 2 MiB of pages into the Thread Local area.
+The Thread Local area is reserved for mapping per-thread page tables that map upper memory beyond the linear mappings. Each kernel thread has its own Level 3-page table that is mapped when activating the thread and allows the thread to temporarily map 2 MiB of pages into the Thread Local area.
 
 Each core is assigned a 2 MiB block within the Thread Local area, Propeller limits ARM builds to 16 cores to ensure the Thread Local area is never larger than 32 MiB. When a thread has local mappings, the kernel will pin the task to that core until unmaps all of its local mappings. This ensures the thread's pointers remain valid across context switches.
 
@@ -429,7 +433,7 @@ The stack pointer table is a single page of 512 8-byte pointer entries. 512 entr
 
 #### Exception Level
 
-The boot loader will have already put the primary core into EL2 or EL1. On startup, Propeller ensures the primary core is in EL1 before performing startup tasks. If the primary core is in an unexpected mode initially, Propeller ahlts.
+The bootloader will have already put the primary core into EL2 or EL1. On startup, Propeller ensures the primary core is in EL1 before performing startup tasks. If the primary core is in an unexpected mode initially, Propeller halts.
 
 #### Basic Startup
 
@@ -437,7 +441,7 @@ Once in EL1 on the primary core, Propeller sets the primary core's stack pointer
 
 With the stack set, Propeller writes all zeros to the `.bss` section.
 
-Next, Propeller checks if the blob provided by the boot loader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
+Next, Propeller checks if the blob provided by the bootloader is a DeviceTree by checking if the first four bytes are the DeviceTree magic bytes. Propeller *only* supports DeviceTrees. If the blob is not a DeviceTree, Propeller halts.
 
 #### Initial Page Tables
 
@@ -608,18 +612,21 @@ After the ISR stacks have been allocated and mapped, Propeller will unpark the s
 
 Refer to [Buddy Allocator][buddyalloc].
 
-A buddy allocator manages a single, contiguous block of physical memory and allocates blocks of up to 2^10 pages. The buddy allocator has a small amount of overhead to track buddy pair state. The allocator computes the size buddy pair state from the size of the memory block, rounds up to the nearest page, and stores the state at the end of the memory block.
+A buddy allocator manages an area of physical memory and allocates blocks of up to 2^10 pages. Buddy allocators coarse allocators that should be used to allocate large blocks for kernel object (slab) allocators and granular, core-local allocators. Buddy allocators are not thread-safe and they do not protect against double-frees.
 
-    Block Start                                  End
-    +--------------------------------------+-------+
-    | Available Pages                      | State |
-    +--------------------------------------+-------+
+The buddy allocator has a small amount of overhead to track buddy pair state. The state is a contiguous array of bits representing buddy pairs of pages. When a bit is 0, either both pages are free or both are allocated. When a bit is 1, only one page in the buddy pair is allocated.
 
-On a system with 1 GiB of physical memory and 4 KiB pages, the buddy allocator needs just shy of 32 KiB for the buddy pair state. Out of the 256 Ki pages available, the buddy allocator will reserve 8 of them for the overhead.
+On a system with 1 GiB of physical memory and 4 KiB pages, the buddy allocator needs just shy of 32 KiB for the buddy pair state. Out of the 256 Ki pages available, the buddy allocator will reserve 8 of them for the metadata. This equates to about 0.003% overhead. This overhead holds with scale. A 3 GiB range requires 24 pages (~96 KiB) out of 768 Ki pages, and a 256 TiB range requires 2,047 Ki pages (~8 GiB) out of 64 Gi pages.
 
-During initialization, the buddy allocator embeds a linked list of free pages for each order directly into the pages themselves. Each field in the linked list structure is pointer-sized.
+The index of a page's bit is simply `(PFN - PFN~0~) >> 1` where `PFN~0~` is the page frame number of the first page in the allocator's area.
 
-    +-------------------+ Page Size
+An allocator may manage multiple discontinuous areas of memory so long as the state area is a contiguous array that includes the unused areas. For example, if an allocator manages the ranges [a:b] and [c:d] where `c > b`, then state memory must be reserved assuming the allocator is managing the range [a:d]. The allocator will never touch the bits in (b:c), so another allocator managing that area is free to use them. Otherwise, they will simply be unused overhead.
+
+Propeller stores the state data for all allocators in linear memory so that the allocators do not need to perform any mapping operations to access the state.
+
+During initialization, the buddy allocator embeds a linked list of free blocks for each order directly into the blocks themselves. Each field in the linked list structure is pointer-sized.
+
+    +-------------------+ Block Size
     | / / / / / / / / / |
     | / / / / / / / / / |
     | / / / / / / / / / |
@@ -631,8 +638,7 @@ During initialization, the buddy allocator embeds a linked list of free pages fo
     | Next Pointer      |
     +-------------------+ 0
 
-The checksum is a checksum of the next and previous pointers to sanity check the linked list when
-allocating a block of memory. Currently, the checksum is simply an XOR checksum. Specifically, `Random Seed ⊕ Next Pointer ⊕ Previous Pointer`.
+When a block is free, the allocator calculates `Random Seed ⊕ Next Pointer ⊕ Previous Pointer` and stores the result in the block's Checksum field as a sanity check.
 
 ## `support` Module
 
