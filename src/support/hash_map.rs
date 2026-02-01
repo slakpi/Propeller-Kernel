@@ -127,6 +127,13 @@ where
     None
   }
 
+  /// Clear the entire map.
+  pub fn clear(&mut self) {
+    for i in 0..N {
+      self.map[i] = None;
+    }
+  }
+
   /// Erase a (key, value) pair from the map.
   ///
   /// # Parameters

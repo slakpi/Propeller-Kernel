@@ -5,6 +5,8 @@ mod tests;
 
 use crate::arch::cpu;
 use crate::support::bits;
+#[cfg(feature = "module_tests")]
+use crate::test;
 
 unsafe extern "C" {
   fn task_get_current_task_addr() -> usize;
@@ -128,6 +130,6 @@ pub fn set_current_task_addr(addr: usize) {
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests() {
-  tests::run_local_mapping_tests();
+pub fn run_tests(context: &mut test::TestContext) {
+  tests::run_tests(context);
 }

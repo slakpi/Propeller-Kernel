@@ -9,6 +9,7 @@ pub use super::arm_common::{cpu, sync};
 pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
+use crate::arch::memory::{FlexAllocator, PageAllocator};
 use crate::support::{bits, dtb, range};
 #[cfg(feature = "module_tests")]
 use crate::test;
@@ -60,7 +61,6 @@ struct KernelConfig {
   kernel_pages_size: usize,
   kernel_stack_list: usize,
   kernel_stack_pages: usize,
-  primary_stack_start: usize,
 }
 
 /// Re-initialization guard.
@@ -77,11 +77,15 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
   kernel_pages_size: 0,
   kernel_stack_list: 0,
   kernel_stack_pages: 0,
-  primary_stack_start: 0,
 };
 
 /// System device tree.
 static mut DEVICE_TREE: device_tree::DeviceTree = device_tree::DeviceTree::new();
+
+/// The base virtual address and size of the ISR stack area.
+static mut ISR_STACK_AREA_VIRTUAL_BASE: usize = 0;
+
+static mut ISR_STACK_AREA_SIZE: usize = 0;
 
 /// Tags memory ranges with the appropriate zone.
 pub struct RangeZoneTagger {}
@@ -150,7 +154,18 @@ pub fn init(config_addr: usize) {
   init_direct_map();
 }
 
-pub fn init_smp(allocator: &mut impl BlockAllocator) {}
+/// Initialize symmetric multiprocessing.
+///
+/// # Parameters
+///
+/// * `allocator` - An allocator suitable for allocating stacks and page tables.
+pub fn init_smp(allocator: &mut impl FlexAllocator) {
+  if get_device_tree().get_core_config().get_core_count() < 2 {
+    return;
+  }
+
+  init_isr_stacks(allocator);
+}
 
 /// Get the size of a page.
 pub const fn get_page_size() -> usize {
@@ -211,7 +226,7 @@ pub fn get_kernel_base() -> usize {
 /// 0xffff_0000_0000_0000, the maximum physical address is
 /// 0x0000_ffff_ffff_ffff.
 pub fn get_maximum_physical_address() -> usize {
-  !crate::arch::get_kernel_base()
+  !get_kernel_base()
 }
 
 /// Get the kernel virtual base address.
@@ -255,6 +270,30 @@ pub fn get_page_database_virtual_base() -> usize {
 /// Get the page database size.
 pub fn get_page_database_size() -> usize {
   PAGE_DATABASE_SIZE
+}
+
+/// Get the base virtual address of the ISR stack area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_isr_stack_area_virtual_base() -> usize {
+  unsafe { ISR_STACK_AREA_VIRTUAL_BASE }
+}
+
+/// Get the size of the ISR stack area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_isr_stack_size() -> usize {
+  unsafe { ISR_STACK_AREA_SIZE }
 }
 
 /// Get the kernel configuration.
@@ -301,33 +340,39 @@ fn init_core_config(blob_vaddr: usize) {
 /// Assumes the system is configured correctly and that there will not be any
 /// overflow when calculating end of the kernel or blob..
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
-  let mem_config = unsafe {
-    ptr::addr_of_mut!(DEVICE_TREE)
-      .as_mut()
-      .unwrap()
-      .get_memory_config_mut()
-  };
-
-  let tagger = RangeZoneTagger {};
-  assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
+  let device_tree = unsafe { ptr::addr_of_mut!(DEVICE_TREE).as_mut().unwrap() };
 
   let kconfig = get_kernel_config();
+  let core_count = device_tree.get_core_config().get_core_count();
+  let page_shift = get_page_shift();
   let section_size = get_section_size();
   let blob_start = bits::align_down(kconfig.blob, section_size);
   let blob_size = bits::align_up(kconfig.blob + blob_size, section_size) - blob_start;
 
+  unsafe {
+    ISR_STACK_AREA_SIZE = ((kconfig.kernel_stack_pages + 1) << page_shift) * core_count;
+    ISR_STACK_AREA_VIRTUAL_BASE = PAGE_DATABASE_VIRTUAL_BASE - ISR_STACK_AREA_SIZE;
+  }
+
+  let tagger = RangeZoneTagger {};
+  let mem_config = device_tree.get_memory_config_mut();
+  assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
+
   let excl = &[
-    range::Range::<MemoryZone> {
+    // Exclude the kernel area.
+    MemoryRange {
       tag: MemoryZone::InvalidZone,
       base: kconfig.virtual_base,
       size: usize::MAX - kconfig.virtual_base + 1,
     },
-    range::Range::<MemoryZone> {
+    // Exclude from 0 up to the end of the kernel.
+    MemoryRange {
       tag: MemoryZone::InvalidZone,
       base: 0,
       size: bits::align_up(kconfig.kernel_base + kconfig.kernel_size, section_size),
     },
-    range::Range::<MemoryZone> {
+    // Exclude the DTB blob.
+    MemoryRange {
       tag: MemoryZone::InvalidZone,
       base: blob_start,
       size: blob_size,
@@ -346,19 +391,23 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 /// Linearly maps physical memory into the kernel page tables. Invalidating the
 /// TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
+  let kconfig = get_kernel_config();
   let mem_config = get_device_tree().get_memory_config();
 
   // Construct a buffered, linear allocator using the reserved kernel pages
-  // area. There will be no more than three bootstrap tables, so start three
-  // pages in. Only 16 pages are reserved, so one 64-bit word is enough.
-  let kconfig = get_kernel_config();
-  let offset = 3 * get_page_size();
+  // area. There will be no more than six bootstrap tables, so start six pages
+  // in.
+  let offset = 6 * get_page_size();
+
+  // Six pages are used leaving 10 available, so the allocator only needs one
+  // 64-bit word for its bitmap.
   let mut allocator = BufferedPageAllocator::<1>::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
     get_page_size(),
   );
 
+  // Linearly map each memory range using 2 MiB sections.
   for range in mem_config.get_ranges() {
     mm::direct_map_memory(
       kconfig.virtual_base,
@@ -372,7 +421,68 @@ fn init_direct_map() {
   }
 }
 
+/// Initialize the ISR stacks.
+///
+/// # Parameters
+///
+/// * `allocator` - Page table and stack allocator.
+///
+/// # Description
+///
+/// Allocates an ISR stack for each secondary core, maps the stacks into the ISR
+/// stack area, and adds entries to the stack list. The primary core's stack
+/// will have already been mapped to the end of the ISR stack area. Cores 1..N
+/// will be placed in the ISR stack area starting at the beginning.
+///
+/// # Assumptions
+///
+/// Assumes multiple cores.
+fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
+  let kconfig = get_kernel_config();
+  let core_config = get_device_tree().get_core_config();
+  let page_shift = get_page_shift();
+  let stack_size = kconfig.kernel_stack_pages << page_shift;
+  let step_size = (kconfig.kernel_stack_pages + 1) << page_shift;
+  let stack_area_base = get_isr_stack_area_virtual_base();
+
+  for (index, core) in core_config.get_cores().iter().enumerate() {
+    // Skip the primary core.
+    if index == 0 {
+      continue;
+    }
+
+    // We must successfully allocate a stack for each core.
+    let (stack_base, _) = allocator
+      .contiguous_alloc(kconfig.kernel_stack_pages)
+      .unwrap();
+
+    // Each stack list entry is the core ID + stack address.
+    let entry_offset = (index * 2) << bits::WORD_SHIFT;
+    let ptr = (kconfig.virtual_base + kconfig.kernel_stack_list + entry_offset) as *mut usize;
+
+    // Calculate the virtual base address for the stack and update the stack
+    // list with the core ID and stack start address.
+    let stack_vbase = stack_area_base + (step_size * (index - 1)) + (1 << page_shift);
+    unsafe {
+      *ptr = core.get_id();
+      *ptr.add(1) = stack_vbase + stack_size;
+    }
+
+    // Map the core's stack into the ISR stack area.
+    mm::map_memory(
+      kconfig.virtual_base,
+      kconfig.kernel_pages_start,
+      stack_vbase,
+      stack_base,
+      stack_size,
+      false,
+      allocator,
+      MappingStrategy::Granular,
+    );
+  }
+}
+
 #[cfg(feature = "module_tests")]
 pub fn run_tests(context: &mut test::TestContext) {
-  task::run_tests();
+  task::run_tests(context);
 }

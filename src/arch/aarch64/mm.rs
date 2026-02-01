@@ -573,8 +573,6 @@ fn alloc_table_and_fill(
   allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) -> usize {
-  let next_level = get_next_table(table_level).unwrap();
-  let mut next_addr = get_phys_addr_from_descriptor(table_level, desc).unwrap();
   let mut desc = desc;
 
   // TODO: It is probably fine to overwrite a section descriptor. If the memory
@@ -583,7 +581,7 @@ fn alloc_table_and_fill(
   //       invalid.
   if !is_pointer_entry(table_level, desc) {
     // Let an assert occur if we cannot allocate a table from linear memory.
-    next_addr = allocator.alloc().unwrap();
+    let next_addr = allocator.alloc().unwrap();
 
     unsafe {
       // Zero out the table. Any entry in the table with 0 in bit 0 is invalid.
@@ -593,7 +591,17 @@ fn alloc_table_and_fill(
     desc = make_pointer_entry(table_level, next_addr).unwrap();
   }
 
-  fill_table(virtual_base, next_level, next_addr, virt, base, size, device, allocator, strategy);
+  fill_table(
+    virtual_base,
+    get_next_table(table_level).unwrap(),
+    get_phys_addr_from_descriptor(table_level, desc).unwrap(),
+    virt,
+    base,
+    size,
+    device,
+    allocator,
+    strategy,
+  );
 
   desc
 }

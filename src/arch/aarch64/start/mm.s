@@ -30,7 +30,9 @@
 .equ TABLE_ENTRY_CNT, (1 << TABLE_SHIFT)
 .equ SECTION_SHIFT,   (PAGE_SHIFT + TABLE_SHIFT)
 .equ SECTION_SIZE,    (1 << SECTION_SHIFT)
-.equ L2_SHIFT,        (SECTION_SHIFT + TABLE_SHIFT)
+.equ L4_SHIFT,        (PAGE_SHIFT)
+.equ L3_SHIFT,        (SECTION_SHIFT)
+.equ L2_SHIFT,        (L3_SHIFT + TABLE_SHIFT)
 .equ L1_SHIFT,        (L2_SHIFT + TABLE_SHIFT)
 
 // EL1 translation control register configuration.
@@ -101,8 +103,7 @@
 ///
 /// # Description
 ///
-/// Maps the kernel and, as necessary, the DTB into 2 MiB sections. The kernel
-/// will re-map the pages after determining the memory layout.
+/// Maps the kernel and, as necessary, the DTB into 2 MiB sections.
 .global mmu_create_kernel_page_tables
 mmu_create_kernel_page_tables:
   fn_entry
@@ -191,6 +192,120 @@ skip_dtb_mapping:
   ldp     x21, x22, [sp, #8 * 2]
   ldp     x23, x24, [sp, #8 * 4]
   fn_exit
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Create the ISR stack area tables and remap the stack pointer.
+///
+/// # Parameters
+///
+/// * x0 - Virtual start address of the primary core's ISR stack.
+///
+/// # Assumptions
+///
+/// Assumes the stack will not require multiple L4 tables.
+///
+/// Assumes the MMU is enabled.
+///
+/// Assumes that the stack is initially empty on entry.
+.global mmu_setup_primary_core_stack
+mmu_setup_primary_core_stack:
+// x9 - Current table address
+// x10 - Next table address
+// x11 - Physical stack base
+// x12 - Stack size
+// x13 - Table index
+// x14 - Page size
+// x15 - Temp
+
+  ldr     x14, =__page_size
+
+// Set up the L1 and L2 pointers. NOTE: the MMU is on, so we will get a virtual
+// address for __kernel_pages_start. It will be linearly-mapped, however, so we
+// can just subtract __virtual_start.
+  adrp    x9, __kernel_pages_start
+  ldr     x15, =__virtual_start
+  sub     x9, x9, x15
+  mov     x10, x9
+  add     x10, x10, x14     // Skip existing L1
+  add     x10, x10, x14     // Skip existing L2
+  add     x10, x10, x14     // Skip existing L3
+
+// Get the stack size.
+  ldr     x12, =__kernel_stack_pages
+  mul     x12, x12, x14
+
+// Get the virtual stack base. Preserve the virtual stack start in the frame
+// pointer.
+  mov     fp, x0
+  sub     x0, x0, x12
+
+// Get the L1 index.
+  mov     x13, x0
+  lsr     x13, x13, #L1_SHIFT
+  and     x13, x13, #0x1ff
+
+// Store the L2 pointer in the L1 table.
+  mov     x15, x10
+  orr     x15, x15, #MM_TYPE_PAGE_TABLE
+  str     x15, [x9, x13, lsl #3]
+
+// Set up the L2 and L3 pointers.
+  mov     x9, x10
+  add     x10, x10, x14
+
+// Get the L2 index.
+  mov     x13, x0
+  lsr     x13, x13, #L2_SHIFT
+  and     x13, x13, #0x1ff
+
+// Store the L3 pointer in the L2 table.
+  mov     x15, x10
+  orr     x15, x15, #MM_TYPE_PAGE_TABLE
+  str     x15, [x9, x13, lsl #3]
+
+// Set up the L3 and L4 pointers.
+  mov     x9, x10
+  add     x10, x10, x14
+
+// Get the L3 index.
+  mov     x13, x0
+  lsr     x13, x13, #L3_SHIFT
+  and     x13, x13, #0x1ff
+
+// Store the L4 pointer in the L3 table.
+  mov     x15, x10
+  orr     x15, x15, #MM_TYPE_PAGE_TABLE
+  str     x15, [x9, x13, lsl #3]
+
+// Get the first L4 index.
+  mov     x13, x0
+  lsr     x13, x13, #L4_SHIFT
+  and     x13, x13, #0x1ff
+
+// Set up the L4 pointer.
+  mov     x9, x10
+
+// Store the page pointers. NOTE: the MMU is on so we will get a virtual
+// address for __kernel_stack_end. It too is linearly mapped, so we can just
+// subtract __virtual_start.
+  ldr     x11, =__kernel_stack_end
+  ldr     x15, =__virtual_start
+  sub     x11, x11, x15
+  mov     x15, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_PAGE)
+  orr     x11, x11, x15
+1:
+  str     x11, [x9, x13, lsl #3]
+  add     x13, x13, #1      // Increment table index
+  add     x11, x11, x14     // Increment stack page
+  sub     x12, x12, x14     // Calculate remaining stack size
+  cbnz    x12, 1b           // Loop back if the stack size is not 0
+
+// Restore the frame pointer to update the stack to the new virtual start.
+  mov     sp, fp
+
   ret
 
 

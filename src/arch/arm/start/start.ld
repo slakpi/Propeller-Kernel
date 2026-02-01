@@ -56,21 +56,13 @@ SECTIONS
 
   .data.stacks : ALIGN(__page_size)
   {
+    . += (__kernel_stack_pages * __page_size);
+    . += (__kernel_stack_pages * __page_size);
+    . += (__kernel_stack_pages * __page_size);
+
     __kernel_svc_stack_end = .;
     . += (__kernel_stack_pages * __page_size);
     __kernel_svc_stack_start = .;
-
-    __kernel_abt_stack_end = .;
-    . += (__kernel_stack_pages * __page_size);
-    __kernel_abt_stack_start = .;
-
-    __kernel_irq_stack_end = .;
-    . += (__kernel_stack_pages * __page_size);
-    __kernel_irq_stack_start = .;
-
-    __kernel_fiq_stack_end = .;
-    . += (__kernel_stack_pages * __page_size);
-    __kernel_fiq_stack_start = .;
   }
 
   .data.stack_pointers : ALIGN(__page_size)

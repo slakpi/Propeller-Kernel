@@ -15,6 +15,8 @@
 .equ SPSR_MASK_ALL_INTERRUPTS, (7 << 6)
 .equ SPSR_HYP_DEFAULT,         (SPSR_MASK_ALL_INTERRUPTS | ARM_SVC_MODE)
 
+.equ PRIMARY_SVC_STACK_START, 0xfe400000
+
 .section ".text.boot"
 
 ///-----------------------------------------------------------------------------
@@ -101,28 +103,11 @@ _secondary_start:
 ///-----------------------------------------------------------------------------
 ///
 /// Entry point for HYP on the primary core.
+///
+///   NOTE: Keep this near `primary_core_boot` for the ADR instruction.
 hyp_entry:
 // Set the exception return address in ELR_hyp.
-  adr     r0, primary_core_boot_rel
-  ldr     r1, primary_core_boot_rel
-  add     r0, r0, r1
-  msr     elr_hyp, r0
-
-// Set the exception return mode to SVC in SPSR_hyp.
-  mov     r0, #SPSR_HYP_DEFAULT
-  msr     spsr_hyp, r0
-
-  eret
-
-
-///-----------------------------------------------------------------------------
-///
-/// Entry point for HYP on a secondary core.
-secondary_hyp_entry:
-// Set the exception return address in ELR_hyp.
-  adr     r0, secondary_core_boot_rel
-  ldr     r1, secondary_core_boot_rel
-  add     r0, r0, r1
+  adr     r0, primary_core_boot
   msr     elr_hyp, r0
 
 // Set the exception return mode to SVC in SPSR_hyp.
@@ -149,9 +134,7 @@ primary_core_boot:
   mov     sp, r1
 
 // Clear the BSS. The Rust core library provides a memset compiler intrinsic.
-  adr     r0, bss_start_rel
-  ldr     r1, bss_start_rel
-  add     r0, r0, r1
+  bl      layout_get_physical_bss_start
   mov     r1, #0
   ldr     r2, =__bss_size
   bl      memset
@@ -174,21 +157,14 @@ primary_core_boot:
   bl      mmu_create_kernel_page_tables
 
 // Save off physical addresses needed for the kernel configuration struct.
-  adr     r4, kernel_start_rel
-  ldr     r5, kernel_start_rel
-  add     r4, r4, r5
+  bl      layout_get_physical_kernel_start
+  mov     r4, r0
 
-  adr     r5, kernel_pages_start_rel
-  ldr     r6, kernel_pages_start_rel
-  add     r5, r5, r6
+  bl      layout_get_physical_pages_start
+  mov     r5, r0
 
-  adr     r6, kernel_svc_stack_start_rel
-  ldr     r7, kernel_svc_stack_start_rel
-  add     r6, r6, r7
-
-  adr     r7, kernel_stack_list_rel
-  ldr     r8, kernel_stack_list_rel
-  add     r7, r7, r8
+  bl      layout_get_physical_stack_list
+  mov     r6, r0
 
 // Setup the MMU and enable it.
 //
@@ -196,18 +172,26 @@ primary_core_boot:
 //         calling `setup_and_enable_mmu`. Do not use branch-and-link.
   ldr     lr, =primary_core_begin_virt_addressing
   b       mmu_setup_and_enable
+
 primary_core_begin_virt_addressing:
+// ISR stack setup with virtual addressing enabled. This has to be done while
+// the identity tables are still valid and the stack is empty.
+  ldr     r0, =PRIMARY_SVC_STACK_START
+  ldr     r1, =__vmsplit
+  bl      mmu_setup_primary_core_stacks
+
+// Clean up the MMU setup now that the identity tables are not required.
   bl      mmu_cleanup_ttbr
+
+// Finish setting up stacks.
   bl      setup_stacks
 
 // Write kernel configuration struct. Provide all addresses as physical.
 //
-//   +---------------------------------+ 44
-//   | Physical primary stack address  |
 //   +---------------------------------+ 40
 //   | ISR stack page count            |
 //   +---------------------------------+ 36
-//   | ISR stack list address          |
+//   | Physical ISR stack list address |
 //   +---------------------------------+ 32
 //   | Virtual memory split            |
 //   +---------------------------------+ 28
@@ -226,7 +210,7 @@ primary_core_begin_virt_addressing:
 //   | Virtual base address            |
 //   +---------------------------------+ 0
   mov     fp, sp
-  sub     sp, sp, #4 * 11
+  sub     sp, sp, #4 * 10
 
   ldr     r2, =__virtual_start
   str     r2, [sp, #4 * 0]
@@ -254,8 +238,6 @@ primary_core_begin_virt_addressing:
   ldr     r1, =__kernel_stack_pages
   str     r1, [sp, #4 * 9]
 
-  str     r7, [sp, #4 * 10]
-
 // Perform the rest of the kernel initialization in Rustland.
   mov     r0, sp
   bl      pk_init
@@ -269,6 +251,30 @@ primary_core_begin_virt_addressing:
 
 ///-----------------------------------------------------------------------------
 ///
+/// See layout.s.
+kernel_svc_stack_start_rel:
+  .word __kernel_svc_stack_start - kernel_svc_stack_start_rel
+
+
+///-----------------------------------------------------------------------------
+///
+/// Entry point for HYP on a secondary core.
+///
+///   NOTE: Keep this near `secondary_core_boot` for the ADR instruction.
+secondary_hyp_entry:
+// Set the exception return address in ELR_hyp.
+  adr     r0, secondary_core_boot
+  msr     elr_hyp, r0
+
+// Set the exception return mode to SVC in SPSR_hyp.
+  mov     r0, #SPSR_HYP_DEFAULT
+  msr     spsr_hyp, r0
+
+  eret
+
+
+///-----------------------------------------------------------------------------
+///
 /// Boot a secondary core.
 secondary_core_boot:
   b       cpu_halt
@@ -276,62 +282,38 @@ secondary_core_boot:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Setup the kernel exception stacks using virtual addressing.
+/// Set up the kernel exception stacks using virtual addressing.
 ///
 /// # Assumptions
 ///
-/// Assumes the core is in SVC mode.
+/// Assumes the core is in SVC mode and the SVC stack has already been set.
 setup_stacks:
 // Save off the CPSR
   mrs     r0, cpsr
 
-// Set the SVC mode stack.
-  ldr     sp, =__kernel_svc_stack_start
+// Calculate the stack size with the guard page.
+  ldr     r1, =__kernel_stack_pages
+  add     r1, r1, #1
+  ldr     r2, =__page_size
+  mul     r1, r1, r2
 
 // Set the ABT mode stack.
+  ldr     r2, =PRIMARY_SVC_STACK_START
+  sub     r2, r2, r1        // Skip the SVC stack.
   msr     cpsr_c, #(0b1100000 | ARM_ABT_MODE)
-  ldr     sp, =__kernel_abt_stack_start
+  mov     sp, r2
 
 // Set the IRQ mode stack.
   msr     cpsr_c, #(0b1100000 | ARM_IRQ_MODE)
-  ldr     sp, =__kernel_irq_stack_start
+  sub     r2, r2, r1
+  mov     sp, r2
 
 // Set the FIQ mode stack.
   msr     cpsr_c, #(0b1100000 | ARM_FIQ_MODE)
-  ldr     sp, =__kernel_fiq_stack_start
+  sub     r2, r2, r1
+  mov     sp, r2
 
 // Reset CPSR.
   msr     cpsr, r0
 
   mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// The ARM toolchain does not support the ADRP pseudo-instruction that allows
-/// getting the 4 KiB page, PC-relative address of a label within +/- 4 GiB. ADR
-/// only allows getting the PC-relative address of a label within +/- 1 MiB.
-///
-/// We create these "relative" labels marking address that are offsets to the
-/// symbols we need. We can use ADR to get the PC-relative address of the label,
-/// then add the value at the label to get the PC-relative address of the actual
-/// label we're interested in.
-///
-/// Once the MMU has been enabled, these are no longer necessary since the LDR
-/// instruction can be used to get the virtual address of the label.
-kernel_start_rel:
-  .word __kernel_start - kernel_start_rel
-kernel_svc_stack_start_rel:
-  .word __kernel_svc_stack_start - kernel_svc_stack_start_rel
-kernel_stack_list_rel:
-  .word __kernel_stack_list - kernel_stack_list_rel
-kernel_id_pages_start_rel:
-  .word __kernel_id_pages_start - kernel_id_pages_start_rel
-kernel_pages_start_rel:
-  .word __kernel_pages_start - kernel_pages_start_rel
-bss_start_rel:
-  .word __bss_start - bss_start_rel
-primary_core_boot_rel:
-  .word primary_core_boot - primary_core_boot_rel
-secondary_core_boot_rel:
-  .word secondary_core_boot - secondary_core_boot_rel

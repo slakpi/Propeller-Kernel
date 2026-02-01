@@ -29,6 +29,9 @@
 .equ SCTLR_EL1_RESERVED,   ((3 << 28) | (3 << 22) | (1 << 20) | (1 << 11) | (3 << 7))
 .equ SCTLR_EL1_DEFAULT,    (SCTLR_EL1_RESERVED | SCTLR_EL1_C)
 
+// The primary core's ISR stack starts at the base of the page database area.
+.equ PRIMARY_STACK_START, 0xfffffe0000000000
+
 .section ".text.boot"
 
 ///-----------------------------------------------------------------------------
@@ -229,8 +232,7 @@ primary_core_boot:
 // Save off physical addresses needed for the kernel configuration struct.
   adrp    x20, __kernel_start
   adrp    x21, __kernel_pages_start
-  adrp    x22, __kernel_stack_start
-  adrp    x23, __kernel_stack_list
+  adrp    x22, __kernel_stack_list
 
 // Enable the MMU.
 //
@@ -240,21 +242,22 @@ primary_core_boot:
   adrp    x1, __kernel_pages_start
   ldr     lr, =primary_core_begin_virt_addressing
   b       mmu_setup_and_enable
+
 primary_core_begin_virt_addressing:
+// ISR stack setup with virtual addressing enabled. This has to be done while
+// the identity tables are still valid and the stack is empty.
+  ldr     x0, =PRIMARY_STACK_START
+  bl      mmu_setup_primary_core_stack
+
+// Clean up the MMU setup now that the identity tables are not required.
   bl      mmu_cleanup
 
 // Setup the exception vectors.
   adr     x9, el1_vectors
   msr     vbar_el1, x9
 
-// ISR stack setup with virtual addressing enabled.
-  ldr     x9, =__kernel_stack_start
-  mov     sp, x9
-
 // Write kernel configuration struct. Provide all addresses as physical.
 //
-//   +---------------------------------+ 80
-//   | Physical primary stack address  |
 //   +---------------------------------+ 72
 //   | ISR stack page count            |
 //   +---------------------------------+ 64
@@ -275,7 +278,7 @@ primary_core_begin_virt_addressing:
 //   | Virtual base address            |
 //   +---------------------------------+ 0
   mov     fp, sp
-  sub     sp, sp, #8 * 10
+  sub     sp, sp, #8 * 9
 
   ldr     x9, =__virtual_start
   ldr     x10, =__page_size
@@ -287,10 +290,10 @@ primary_core_begin_virt_addressing:
   stp     x9, x21, [sp, #8 * 4]
 
   ldr     x9, =__kernel_pages_size
-  stp     x9, x23, [sp, #8 * 6]
+  stp     x9, x22, [sp, #8 * 6]
 
   ldr     x9, =__kernel_stack_pages
-  stp     x9, x23, [sp, #8 * 8]
+  str     x9, [sp, #8 * 8]
 
 // Perform single-threaded kernel initialization.
   mov     x0, sp

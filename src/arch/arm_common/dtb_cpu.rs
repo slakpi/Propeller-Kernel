@@ -1,6 +1,6 @@
 //! ARM Common DTB CPU Scanner
 
-use super::cpu::{Core, CoreConfig, CoreEnableMethod};
+use super::cpu::{self, Core, CoreConfig, CoreEnableMethod};
 use crate::support::{dtb, hash, hash_map};
 use core::cmp;
 
@@ -22,6 +22,7 @@ type StringMap = hash_map::HashMap<&'static [u8], DtbStringTag, hash::BuildFnv1a
 /// Core node scanner.
 struct DtbCoreScanner<'config> {
   config: &'config mut CoreConfig,
+  primary_id: usize,
   string_map: StringMap,
   addr_cells: u32,
   def_enable_method: CoreEnableMethod,
@@ -50,9 +51,10 @@ impl<'config> DtbCoreScanner<'config> {
   }
 
   /// Construct a new DtbCoreScanner.
-  pub fn new(config: &'config mut CoreConfig) -> Self {
+  pub fn new(config: &'config mut CoreConfig, primary_id: usize) -> Self {
     DtbCoreScanner {
       config,
+      primary_id,
       string_map: Self::build_string_map(),
       addr_cells: 0,
       def_enable_method: CoreEnableMethod::Invalid,
@@ -163,6 +165,14 @@ impl<'config> DtbCoreScanner<'config> {
       }
     }
 
+    let is_primary = core.id == self.primary_id;
+
+    // Reserve a spot in the configuration to ensure that we always add the
+    // primary core.
+    if !is_primary && self.config.get_core_count() > cpu::MAX_CORES - 1 {
+      return Ok(());
+    }
+
     // Use the default enable method if this core does not specify one.
     match core.enable_method {
       CoreEnableMethod::Invalid => core.enable_method = self.def_enable_method,
@@ -171,7 +181,7 @@ impl<'config> DtbCoreScanner<'config> {
 
     // Do not worry if we were unable to add the core. If there are too many
     // cores, we will just ignore it.
-    _ = self.config.add_core(core);
+    _ = self.config.add_core(core, is_primary);
 
     Ok(())
   }
@@ -338,6 +348,10 @@ impl<'config> dtb::DtbScanner for DtbCoreScanner<'config> {
 /// * `config` - The core configuration.
 /// * `blob_vaddr` - The DTB virtual address.
 ///
+/// # Assumptions
+///
+/// Assumes the caller is on the primary core.
+///
 /// # Returns
 ///
 /// True if able to read the core configuration and at least one valid core is
@@ -345,7 +359,7 @@ impl<'config> dtb::DtbScanner for DtbCoreScanner<'config> {
 pub fn get_core_config(config: &mut CoreConfig, blob_vaddr: usize) -> bool {
   config.reset();
 
-  let mut scanner = DtbCoreScanner::new(config);
+  let mut scanner = DtbCoreScanner::new(config, cpu::get_id());
 
   let reader = match dtb::DtbReader::new(blob_vaddr) {
     Ok(r) => r,

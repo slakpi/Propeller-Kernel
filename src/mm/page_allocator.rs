@@ -1,10 +1,4 @@
 //! Buddy Page Allocator
-//!
-//! https://en.wikipedia.org/wiki/Buddy_memory_allocation
-//! https://www.kernel.org/doc/gorman/html/understand/understand009.html
-//!
-//!   NOTE: The allocator is NOT thread-safe.
-//!   NOTE: The allocator does NOT protect against double-free bugs/attacks.
 
 #[cfg(feature = "module_tests")]
 mod tests;
@@ -66,6 +60,12 @@ struct BlockLevel {
 }
 
 /// The Buddy Allocator
+///
+/// https://en.wikipedia.org/wiki/Buddy_memory_allocation
+/// https://www.kernel.org/doc/gorman/html/understand/understand009.html
+///
+///   NOTE: The allocator is NOT thread-safe.
+///   NOTE: The allocator does NOT protect against double-free bugs/attacks.
 pub struct BuddyPageAllocator<'memory> {
   base: usize,
   size: usize,

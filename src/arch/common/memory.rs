@@ -71,9 +71,9 @@ pub trait PageAllocator {
   fn free(&mut self, addr: usize);
 }
 
-/// Contiguous page block allocator interface.
+/// Physically-contiguous page block allocator interface.
 pub trait BlockAllocator {
-  /// Allocate a physically-contiguous block of pages from linear memory.
+  /// Allocate a physically-contiguous block of pages from memory.
   ///
   /// # Parameters
   ///
@@ -81,12 +81,12 @@ pub trait BlockAllocator {
   ///
   /// # Returns
   ///
-  /// A tuple with the physical base address of the block in linear memory and
-  /// the actual number of pages allocated, or None if a block of the requested
-  /// size could not be allocated.
+  /// A tuple with the physical base address of the block and the actual number
+  /// of pages allocated, or None if a block of the requested size could not be
+  /// allocated.
   fn contiguous_alloc(&mut self, pages: usize) -> Option<(usize, usize)>;
 
-  /// Free a contiguous block of page in linear memory.
+  /// Free a contiguous block of page in memory.
   ///
   /// # Parameters
   ///
@@ -94,6 +94,10 @@ pub trait BlockAllocator {
   /// * `pages` - The number of pages to free.
   fn contiguous_free(&mut self, addr: usize, pages: usize);
 }
+
+/// A flexible allocator can allocate either individual pages or physically-
+/// contiguous blocks of pages.
+pub trait FlexAllocator: PageAllocator + BlockAllocator {}
 
 /// The buffered page allocator provides pages from a pre-allocated block of
 /// memory. The buffered page allocator only allocates single pages. The

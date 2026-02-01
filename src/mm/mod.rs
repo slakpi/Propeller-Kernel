@@ -1,12 +1,16 @@
 //! Memory Management
 
+mod dyn_flex_allocator;
 mod page_allocator;
 
 use crate::arch;
-use crate::arch::memory::{BlockAllocator, MemoryConfig, MemoryRange, MemoryZone, PageAllocator};
+use crate::arch::memory::{
+  BlockAllocator, FlexAllocator, MemoryConfig, MemoryRange, MemoryZone, PageAllocator,
+};
 use crate::support::bits;
 use crate::sync::{SpinLock, SpinLockGuard};
 use core::ptr;
+use dyn_flex_allocator::DynamicFlexAllocator;
 use page_allocator::BuddyPageAllocator;
 
 /// Tracks the overall memory ranges covered by each zone and the required
@@ -23,7 +27,7 @@ struct ZoneInfo {
 const PER_CORE_PAGE_BUFFER_SIZE: usize = 256;
 
 /// Convenience type for the per-core linear allocators.
-type PerCoreLinearAllocator = DynamicBufferedPageAllocator<PER_CORE_PAGE_BUFFER_SIZE>;
+type PerCoreLinearAllocator = DynamicFlexAllocator<'static, PER_CORE_PAGE_BUFFER_SIZE>;
 
 /// Total number of zone allocators and their indices.
 const ZONE_ALLOCATOR_COUNT: usize = 2;
@@ -35,8 +39,9 @@ const HIGH_MEMORY_ALLOCATOR: usize = 1;
 /// Convenience initializer for the zone allocator array.
 const ZONE_ALLOCATOR_INITIALIZER: Option<SpinLock<BuddyPageAllocator>> = None;
 
-/// Convenience initializer for the per-core dynamic allocator array.
-const DYNAMIC_MEMORY_ALLOCATOR_INITIALIZER: PerCoreLinearAllocator = PerCoreLinearAllocator::new();
+/// Convenience initializer for the per-core dynamic linear allocator array.
+const PER_CORE_ALLOCATOR_INITIALIZER: PerCoreLinearAllocator =
+  PerCoreLinearAllocator::new(get_linear_zone_allocator);
 
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
@@ -57,156 +62,7 @@ static mut ZONE_ALLOCATORS: [Option<SpinLock<BuddyPageAllocator>>; ZONE_ALLOCATO
 ///         a count, a page address, and maybe a slice reference for convenient
 ///         access.
 static mut PER_CORE_ALLOCATORS: [PerCoreLinearAllocator; arch::cpu::MAX_CORES] =
-  [DYNAMIC_MEMORY_ALLOCATOR_INITIALIZER; arch::cpu::MAX_CORES];
-
-/// Dynamic, buffered page allocator. Performed buffered single-page
-/// allocations and unbuffered block allocations from linear memory. The buffer
-/// size is in words, so the maximum number of pages an allocator can buffer is
-/// `BUFFER_SIZE << bits::WORD_BIT_SHIFT`.
-pub struct DynamicBufferedPageAllocator<const BUFFER_SIZE: usize> {
-  page_buffer: [usize; BUFFER_SIZE],
-  buffer_count: usize,
-}
-
-impl<const BUFFER_SIZE: usize> DynamicBufferedPageAllocator<BUFFER_SIZE> {
-  /// Convenience buffer initializer.
-  const PAGE_BUFFER_INITIALIZER: [usize; BUFFER_SIZE] = [0; BUFFER_SIZE];
-
-  /// Construct a new dynamic linear page allocator.
-  pub const fn new() -> Self {
-    Self {
-      page_buffer: Self::PAGE_BUFFER_INITIALIZER,
-      buffer_count: 0,
-    }
-  }
-
-  /// Buffered free helper.
-  fn buffered_free(&mut self, addr: usize) -> bool {
-    if self.buffer_count >= BUFFER_SIZE {
-      return false;
-    }
-
-    self.page_buffer[self.buffer_count] = addr;
-    self.buffer_count += 1;
-    true
-  }
-
-  /// Unbuffered allocation helper.
-  fn unbuffered_alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
-    let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
-    let alloc = allocators[LINEAR_MEMORY_ALLOCATOR].as_mut().unwrap();
-    let mut guard = alloc.lock();
-    guard.allocate(pages)
-  }
-
-  /// Unbuffered free helper.
-  fn unbuffered_free(&mut self, addr: usize, pages: usize) {
-    let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
-    let alloc = allocators[LINEAR_MEMORY_ALLOCATOR].as_mut().unwrap();
-    let mut guard = alloc.lock();
-    guard.free(addr, pages);
-  }
-}
-
-impl<const BUFFER_SIZE: usize> PageAllocator for DynamicBufferedPageAllocator<BUFFER_SIZE> {
-  /// See `PageAllocator::alloc`.
-  fn alloc(&mut self) -> Option<usize> {
-    // Attempt to refill the page buffer.
-    if self.buffer_count == 0 {
-      let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
-      let alloc = allocators[LINEAR_MEMORY_ALLOCATOR].as_mut().unwrap();
-      let mut guard = alloc.lock();
-
-      while self.buffer_count < BUFFER_SIZE {
-        let addr = guard.allocate(1);
-
-        if addr.is_none() {
-          break;
-        }
-
-        self.page_buffer[self.buffer_count] = addr.unwrap().0;
-        self.buffer_count += 1;
-      }
-    }
-
-    // If the buffer is still empty, there are no free pages.
-    if self.buffer_count == 0 {
-      return None;
-    }
-
-    // Get a page from the buffer.
-    self.buffer_count -= 1;
-    Some(self.page_buffer[self.buffer_count])
-  }
-
-  /// See `PageAllocator::free`.
-  fn free(&mut self, addr: usize) {
-    // If the addr is zero, there is nothing to do.
-    if addr == 0 {
-      return;
-    }
-
-    // Add the page back to the buffer if able.
-    if self.buffered_free(addr) {
-      return;
-    }
-
-    // Otherwise, give the page back to the linear memory allocator.
-    self.unbuffered_free(addr, 1);
-  }
-}
-
-impl<const BUFFER_SIZE: usize> BlockAllocator for DynamicBufferedPageAllocator<BUFFER_SIZE> {
-  /// See `PageAllocator::contiguous_alloc`.
-  fn contiguous_alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
-    // If pages is zero, there is nothing to do.
-    if pages == 0 {
-      return None;
-    }
-
-    // If requesting a single page, go the buffered route.
-    if pages == 1 {
-      if let Some(addr) = self.alloc() {
-        return Some((addr, 1));
-      }
-
-      return None;
-    }
-
-    // Otherwise, request a block from the linear memory allocator.
-    self.unbuffered_alloc(pages)
-  }
-
-  /// See `BlockAllocator::contiguous_free`.
-  fn contiguous_free(&mut self, addr: usize, pages: usize) {
-    // If the addr or page count is zero, there is nothing to do.
-    if addr == 0 || pages == 0 {
-      return;
-    }
-
-    // If freeing a single page, just add it to the buffer if able to avoid
-    // locking the linear memory allocator.
-    if pages == 1 && self.buffered_free(addr) {
-      return;
-    }
-
-    // Otherwise, give the page(s) back to the linear memory allocator.
-    self.unbuffered_free(addr, pages);
-  }
-}
-
-impl<const BUFFER_SIZE: usize> Drop for DynamicBufferedPageAllocator<BUFFER_SIZE> {
-  /// Release all buffered pages.
-  fn drop(&mut self) {
-    let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
-    let alloc = allocators[LINEAR_MEMORY_ALLOCATOR].as_mut().unwrap();
-    let mut guard = alloc.lock();
-
-    for i in 0..self.buffer_count {
-      guard.free(self.page_buffer[i], 1);
-    }
-  }
-}
+  [PER_CORE_ALLOCATOR_INITIALIZER; arch::cpu::MAX_CORES];
 
 /// Initialize the memory management module.
 ///
@@ -393,6 +249,12 @@ fn get_zone_index(zone: MemoryZone) -> Option<usize> {
     MemoryZone::HighMemoryZone => Some(HIGH_MEMORY_ALLOCATOR),
     _ => None,
   }
+}
+
+/// Helper callback to get the linear zone allocator.
+fn get_linear_zone_allocator() -> &'static mut SpinLock<BuddyPageAllocator<'static>> {
+  let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
+  allocators[LINEAR_MEMORY_ALLOCATOR].as_mut().unwrap()
 }
 
 /// Run the memory management tests.

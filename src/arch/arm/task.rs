@@ -7,6 +7,8 @@ use super::mm;
 use crate::arch::cpu;
 use crate::arch::cpu::MAX_CORES;
 use crate::support::bits;
+#[cfg(feature = "module_tests")]
+use crate::{execute_test, test};
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -101,7 +103,7 @@ impl TaskContext {
   fn get_thread_local_virtual_base(core_idx: usize) -> usize {
     assert!(core_idx < super::get_device_tree().get_core_config().get_core_count());
     let offset = core_idx << super::get_section_shift();
-    unsafe { super::THREAD_LOCAL_VIRTUAL_BASE + offset }
+    unsafe { super::THREAD_LOCAL_AREA_VIRTUAL_BASE + offset }
   }
 
   /// Construct an empty task context.
@@ -284,6 +286,6 @@ pub fn set_current_task_addr(addr: usize) {
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests() {
-  tests::run_local_mapping_tests();
+pub fn run_tests(context: &mut test::TestContext) {
+  tests::run_tests(context);
 }

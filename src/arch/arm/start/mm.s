@@ -93,7 +93,9 @@
 .equ L3_TABLE_ENTRY_CNT, (1 << L3_TABLE_SHIFT)
 .equ SECTION_SHIFT,      (PAGE_SHIFT + L3_TABLE_SHIFT)
 .equ SECTION_SIZE,       (1 << SECTION_SHIFT)
-.equ L1_SHIFT,           (SECTION_SHIFT + L2_TABLE_SHIFT)
+.equ L3_SHIFT,           (PAGE_SHIFT)
+.equ L2_SHIFT,           (L3_SHIFT + L3_TABLE_SHIFT)
+.equ L1_SHIFT,           (L2_SHIFT + L2_TABLE_SHIFT)
 
 ///-----------------------------------------------------------------------------
 ///
@@ -136,21 +138,18 @@ mmu_create_kernel_page_tables:
   mov     r7, r1
 
 // Align the kernel size on a section.
+  bl      layout_get_physical_kernel_end
+  mov     r1, r0
   mov     r0, #0
-  adr     r1, kernel_end_rel
-  ldr     r2, kernel_end_rel
-  add     r1, r1, r2
   bl      section_align_block
   mov     r5, r1
 
 // Initialize the indirect memory attributes
   bl      init_mair
 
-// Clear the kernel page tables.
-  adr     r0, kernel_pages_start_rel
-  ldr     r1, kernel_pages_start_rel
-  add     r9, r0, r1
-  mov     r0, r9
+// Clear the kernel page tables; save the start address.
+  bl      layout_get_physical_pages_start
+  mov     r9, r0
   mov     r1, #0
   ldr     r2, =__kernel_pages_size
   bl      memset
@@ -180,10 +179,9 @@ mmu_create_kernel_page_tables:
   str     r1, [r10, r0]
 
 // Map the vectors into the kernel page tables.
+  bl      layout_get_physical_exception_vectors_start
+  mov     r1, r0
   mov     r0, r10
-  adr     r1, kernel_exception_vectors_start_rel
-  ldr     r3, kernel_exception_vectors_start_rel
-  add     r1, r1, r3
   bl      map_vectors
 
 // Map the kernel area as RW normal memory.
@@ -218,11 +216,9 @@ mmu_create_kernel_page_tables:
   pop     {r4}
 
 1:
-// Clear the kernel identity page tables.
-  adr     r0, kernel_id_pages_start_rel
-  ldr     r1, kernel_id_pages_start_rel
-  add     r9, r0, r1
-  mov     r0, r9
+// Clear the kernel identity page tables; save the start address.
+  bl      layout_get_physical_id_pages_start
+  mov     r9, r0
   mov     r1, #0
   ldr     r2, =__kernel_id_pages_size
   bl      memset
@@ -237,10 +233,9 @@ mmu_create_kernel_page_tables:
   mov     r10, r1           // Save the upper L2 table address
 
 // Map the vectors into the kernel identity page tables.
+  bl      layout_get_physical_exception_vectors_start
+  mov     r1, r0
   mov     r0, r10
-  adr     r1, kernel_exception_vectors_start_rel
-  ldr     r3, kernel_exception_vectors_start_rel
-  add     r1, r1, r3
   bl      map_vectors
 
 // Map the kernel area as RW normal memory. See above.
@@ -256,6 +251,156 @@ mmu_create_kernel_page_tables:
 
   pop     {r4, r5, r6, r7, r8, r9, r10}
   fn_exit
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Map the primary core's SVC, ABT, IRQ, and FIQ stacks.
+///
+/// # Parameters
+///
+/// * r0 - Virtual start address of the primary core's SVC stack.
+/// * r1 - The virtual memory split.
+///
+/// # Description
+///
+/// The primary core's stacks will be mapped in the following order:
+///
+///     +---------------------------+ r0
+///     | SVC Stack                 |
+///     +---------------------------+
+///     | / / / / / Guard / / / / / |
+///     +---------------------------+
+///     | ABT Stack                 |
+///     +---------------------------+
+///     | / / / / / Guard / / / / / |
+///     +---------------------------+
+///     | IRQ Stack                 |
+///     +---------------------------+
+///     | / / / / / Guard / / / / / |
+///     +---------------------------+
+///     | FIQ Stack                 |
+///     +---------------------------+
+///     | / / / / / Guard / / / / / |
+///     +---------------------------+ r0 - 4 * (stack pages + 1) * page size
+///
+/// Upon return, the stack pointer will be updated to the provided start
+/// address.
+///
+/// # Assumptions
+///
+/// Assumes the stack will not require multiple L3 tables.
+///
+/// Assumes the MMU is enabled and the identity tables are still configured.
+///
+/// Assumes the caller is in SVC.
+///
+/// Assumes that the stack is initially empty on entry.
+.global mmu_setup_primary_core_stacks
+mmu_setup_primary_core_stacks:
+// r4 - Current table address
+// r5 - Next table address
+// r6 - Physical stack base
+// r7 - Stack size
+// r8 - Table index
+// r9 - Page size
+// r10 - Temp
+  push    {r4, r5, r6, r7, r8, r9, r10}
+
+  ldr     r9, =__page_size
+
+// If using a 2/2 split, we will have a L1 and L2 table and we just need to
+// skip the L1 table. If using a 3/1 split, we only have a L2 table. NOTE: the
+// MMU is on, so we will get a virtual address for __kernel_pages_start. It will
+// be linearly-mapped, however, so we can just subtract __virtual_start, then
+// use physical addresses for both the table entries and writing to the table.
+  ldr     r4, =__kernel_pages_start
+  ldr     r10, =__virtual_start
+  sub     r4, r4, r10       // L1 or L2 physical address
+  cmp     r1, #3
+  beq     1f                // If a 3/1 split, skip table increment
+  add     r4, r4, r9        // Skip L1 table
+
+1:
+// Set up the L3 pointer.
+  mov     r5, r4
+  add     r5, r5, r9        // Skip existing L2
+  add     r5, r5, r9        // Skip existing L3
+
+// Get the stack size.
+  ldr     r7, =__kernel_stack_pages
+  mul     r7, r7, r9
+
+// Preserve the virtual stack start in the frame pointer.
+  mov     fp, r0
+
+// Calculate the base of the FIQ stack.
+  mov     r10, r7
+  add     r10, r10, r9      // Size with guard page
+  lsl     r10, r10, #2      // Four stacks
+  sub     r0, r0, r10
+
+// Get the L2 entry address.
+  mov     r8, r0
+  lsr     r8, r8, #L2_SHIFT
+  ldr     r10, =0x1ff
+  and     r8, r8, r10
+  add     r4, r8, lsl #3
+
+// Store the L3 pointer in the L2 table.
+  mov     r10, r5
+  orr     r10, r10, #MM_TYPE_PAGE_TABLE
+  str     r10, [r4], #4
+  mov     r10, #0
+  str     r10, [r4], #4
+
+// Set up the L3 pointer.
+  mov     r4, r5
+
+// Get the first L3 entry address.
+  mov     r8, r0
+  lsr     r8, r8, #L3_SHIFT
+  ldr     r10, =0x1ff
+  and     r8, r8, r10
+  add     r4, r8, lsl #3
+
+// Get the physical base of the FIQ stack.
+  ldr     r6, =__kernel_svc_stack_start
+  ldr     r10, =__virtual_start
+  sub     r6, r6, r10
+  sub     r6, r7, lsl #2
+
+// Set up the page entries.
+  mov     r10, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_PAGE)
+  orr     r6, r6, r10
+
+// Outer loop for the four stacks.
+  mov     r2, #0            // Zero each entry's high word
+  mov     r3, #4
+
+2:
+// Inner loop over the stack pages.
+  add     r4, r4, #8        // Skip guard page entry
+  mov     r10, r7           // Stack size counter
+
+3:
+  str     r6, [r4], #4      // Store the entry low word
+  str     r2, [r4], #4      // Store the entry high word
+  add     r6, r6, r9        // Increment physical stack page
+
+  sub     r10, r10, r9      // Subtract page size
+  cmp     r10, #0
+  bne     3b                // Loop back to add next entry
+
+  sub     r3, r3, #1        // Decrement stack count
+  cmp     r3, #0
+  bne     2b                // Loop back to add next stack
+
+// Pop the registers and manually restore the frame pointer to change the stack
+// over to the correct pointer before returning.
+  pop     {r4, r5, r6, r7, r8, r9, r10}
+  mov     sp, fp
   mov     pc, lr
 
 
@@ -588,38 +733,17 @@ make_ttbcr_value:
 ///
 /// Sets up TTBR0 with the identity tables and TTBR1 with the kernel tables.
 setup_ttbr:
+  fn_entry
+
 // Set TTBR1 to the kernel pages.
-  adr     r0, kernel_pages_start_rel
-  ldr     r1, kernel_pages_start_rel
-  add     r0, r0, r1
+  bl      layout_get_physical_pages_start
   mov     r1, #0
   mcrr    p15, 1, r0, r1, c2
 
 // Set TTBR0 to the identity pages.
-  adr     r0, kernel_id_pages_start_rel
-  ldr     r1, kernel_id_pages_start_rel
-  add     r0, r0, r1
+  bl      layout_get_physical_id_pages_start
   mov     r1, #0
   mcrr    p15, 0, r0, r1, c2
 
+  fn_exit
   mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// See start.s.
-///
-///   TODO: These should probably be passed in as parameters rather than
-///         re-defining them.
-kernel_exception_vectors_start_rel:
-  .word __kernel_exception_vectors_start - kernel_exception_vectors_start_rel
-kernel_id_pages_start_rel:
-  .word __kernel_id_pages_start - kernel_id_pages_start_rel
-kernel_id_pages_end_rel:
-  .word __kernel_id_pages_end - kernel_id_pages_end_rel
-kernel_pages_start_rel:
-  .word __kernel_pages_start - kernel_pages_start_rel
-kernel_pages_end_rel:
-  .word __kernel_pages_end - kernel_pages_end_rel
-kernel_end_rel:
-  .word __kernel_end - kernel_end_rel

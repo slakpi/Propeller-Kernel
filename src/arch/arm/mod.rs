@@ -14,7 +14,7 @@ use crate::support::{bits, dtb, range};
 use crate::test;
 use core::ptr;
 use memory::{
-  BlockAllocator, BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange,
+  BufferedPageAllocator, FlexAllocator, MappingStrategy, MemoryConfig, MemoryRange,
   MemoryRangeHandler, MemoryZone,
 };
 
@@ -70,7 +70,6 @@ struct KernelConfig {
   vm_split: usize,
   kernel_stack_list: usize,
   kernel_stack_pages: usize,
-  primary_stack_start: usize,
 }
 
 /// Re-initialization guard.
@@ -88,14 +87,20 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
   vm_split: 0,
   kernel_stack_list: 0,
   kernel_stack_pages: 0,
-  primary_stack_start: 0,
 };
 
 /// System device tree.
 static mut DEVICE_TREE: device_tree::DeviceTree = device_tree::DeviceTree::new();
 
-/// The base virtual address of the thread local mapping area.
-static mut THREAD_LOCAL_VIRTUAL_BASE: usize = 0;
+/// The base virtual address and size of the thread local mapping area.
+static mut THREAD_LOCAL_AREA_VIRTUAL_BASE: usize = 0;
+
+static mut THREAD_LOCAL_AREA_SIZE: usize = 0;
+
+/// The base virtual address and size of the ISR stack area.
+static mut ISR_STACK_AREA_VIRTUAL_BASE: usize = 0;
+
+static mut ISR_STACK_AREA_SIZE: usize = 0;
 
 /// Tags memory ranges with the appropriate zone.
 pub struct RangeZoneTagger {
@@ -202,7 +207,18 @@ pub fn init(config_addr: usize) {
   init_direct_map();
 }
 
-pub fn init_smp(allocator: &mut impl BlockAllocator) {}
+/// Initialize symmetric multiprocessing.
+///
+/// # Parameters
+///
+/// * `allocator` - An allocator suitable for allocating stacks and page tables.
+pub fn init_smp(allocator: &mut impl FlexAllocator) {
+  if get_device_tree().get_core_config().get_core_count() < 2 {
+    return;
+  }
+
+  init_isr_stacks(allocator);
+}
 
 /// Get the size of a page.
 pub const fn get_page_size() -> usize {
@@ -275,15 +291,6 @@ pub fn get_kernel_virtual_base() -> usize {
   unsafe { KERNEL_CONFIG.virtual_base }
 }
 
-/// Get the base physical address of the high memory area.
-///
-/// # Description
-///
-///   NOTE: Private to the ARM architecture
-fn get_high_mem_base() -> usize {
-  usize::MAX - get_kernel_virtual_base() - HIGH_MEM_SIZE + 1
-}
-
 /// Get the system device tree.
 ///
 /// # Description
@@ -315,6 +322,63 @@ pub fn get_page_database_virtual_base() -> usize {
 /// Get the size of the page database.
 pub fn get_page_database_size() -> usize {
   PAGE_DATABASE_SIZE
+}
+
+/// Get the base physical address of the high memory area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+fn get_high_mem_base() -> usize {
+  usize::MAX - get_kernel_virtual_base() - HIGH_MEM_SIZE + 1
+}
+
+/// Get the base virtual address of the thread local mapping area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_thread_local_area_virtual_base() -> usize {
+  unsafe { THREAD_LOCAL_AREA_VIRTUAL_BASE }
+}
+
+/// Get the size of the thread local mapping area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_thread_local_area_size() -> usize {
+  unsafe { THREAD_LOCAL_AREA_SIZE }
+}
+
+/// Get the base virtual address of the ISR stack area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_isr_stack_area_virtual_base() -> usize {
+  unsafe { ISR_STACK_AREA_VIRTUAL_BASE }
+}
+
+/// Get the size of the ISR stack area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+fn get_isr_stack_size() -> usize {
+  unsafe { ISR_STACK_AREA_SIZE }
 }
 
 /// Get the kernel configuration.
@@ -361,33 +425,48 @@ fn init_core_config(blob_vaddr: usize) {
 /// Assumes the system is configured correctly and that there will not be any
 /// overflow when calculating end of the kernel or blob.
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
-  let mem_config = unsafe {
-    ptr::addr_of_mut!(DEVICE_TREE)
-      .as_mut()
-      .unwrap()
-      .get_memory_config_mut()
-  };
-
-  let tagger = RangeZoneTagger::new(get_high_mem_base());
-  assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
+  let device_tree = unsafe { ptr::addr_of_mut!(DEVICE_TREE).as_mut().unwrap() };
 
   let kconfig = get_kernel_config();
+  let core_count = device_tree.get_core_config().get_core_count();
+  let page_shift = get_page_shift();
   let section_size = get_section_size();
   let blob_start = bits::align_down(kconfig.blob, section_size);
   let blob_size = bits::align_up(kconfig.blob + blob_size, section_size) - blob_start;
 
+  unsafe {
+    ISR_STACK_AREA_SIZE = ((kconfig.kernel_stack_pages + 1) << page_shift) * 4 * core_count;
+    ISR_STACK_AREA_VIRTUAL_BASE = PAGE_DATABASE_VIRTUAL_BASE - ISR_STACK_AREA_SIZE;
+    THREAD_LOCAL_AREA_SIZE = section_size * core_count;
+    THREAD_LOCAL_AREA_VIRTUAL_BASE =
+      bits::align_down(ISR_STACK_AREA_VIRTUAL_BASE - THREAD_LOCAL_AREA_SIZE, section_size);
+  }
+
+  let tagger = RangeZoneTagger::new(get_high_mem_base());
+  let mem_config = device_tree.get_memory_config_mut();
+  assert!(dtb_memory::get_memory_layout(mem_config, &tagger, blob_vaddr));
+
   let excl = &[
-    range::Range::<MemoryZone> {
+    // Exclude the page database.
+    MemoryRange {
+      tag: MemoryZone::InvalidZone,
+      base: PAGE_DATABASE_VIRTUAL_BASE - kconfig.virtual_base,
+      size: PAGE_DATABASE_SIZE,
+    },
+    // Exclude the kernel area.
+    MemoryRange {
       tag: MemoryZone::InvalidZone,
       base: kconfig.virtual_base,
       size: usize::MAX - kconfig.virtual_base + 1,
     },
-    range::Range::<MemoryZone> {
+    // Exclude from 0 up to the end of the kernel.
+    MemoryRange {
       tag: MemoryZone::InvalidZone,
       base: 0,
       size: bits::align_up(kconfig.kernel_base + kconfig.kernel_size, section_size),
     },
-    range::Range::<MemoryZone> {
+    // Exclude the DTB blob.
+    MemoryRange {
       tag: MemoryZone::InvalidZone,
       base: blob_start,
       size: blob_size,
@@ -406,55 +485,132 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 /// Linearly maps physical memory into the kernel page tables. Invalidating the
 /// TLB is not required here. We are only adding new entries at this point.
 fn init_direct_map() {
-  // Calculate the base of the thread local area.
-  let device_tree = get_device_tree();
-  let core_count = device_tree.get_core_config().get_core_count();
-  let section_size = get_section_size();
-  let thread_local_size = section_size * core_count;
-
-  unsafe {
-    THREAD_LOCAL_VIRTUAL_BASE =
-      bits::align_down(PAGE_DATABASE_VIRTUAL_BASE - thread_local_size, section_size);
-  }
+  let kconfig = get_kernel_config();
 
   // The memory layout already excludes any physical memory beyond the kernel /
   // user split. However, we still need to mask off physical memory that cannot
   // be linearly mapped.
-  let mut linear_mem = *device_tree.get_memory_config();
   let high_mem_base = get_high_mem_base();
-  let excl = range::Range::<MemoryZone> {
+  let excl = MemoryRange {
     tag: MemoryZone::InvalidZone,
     base: high_mem_base,
     size: usize::MAX - high_mem_base + 1,
   };
 
-  linear_mem.exclude_range(&excl);
-
-  // Construct a buffered, linear allocator using the reserved kernel pages
-  // area. There will be no more than three bootstrap tables, so start three
-  // pages in. Only 16 pages are reserved, so one 32-bit word is enough.
-  let kconfig = get_kernel_config();
-  let offset = 3 * kconfig.page_size;
+  // After initial setup, there should be a maximum of four page tables in use.
+  // That leaves 12, so a single 32-bit word is enough for the allocator's
+  // bitmap.
+  let offset = 4 * kconfig.page_size;
   let mut allocator = BufferedPageAllocator::<1>::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
     get_page_size(),
   );
 
-  for range in linear_mem.get_ranges() {
-    mm::direct_map_memory(
-      kconfig.virtual_base,
-      kconfig.kernel_pages_start,
-      range.base,
-      range.size,
-      false,
-      &mut allocator,
-      MappingStrategy::Compact,
-    );
+  // Linearly map each memory range using 2 MiB sections. For each range in the
+  // memory configuration, exclude the high memory area. This adds roughly the
+  // same amount of time overhead as copying the memory configuration and
+  // excluding the high memory area from the set but does not incur the stack
+  // space or time cost of copying the configuration.
+  for range in get_device_tree().get_memory_config().get_ranges() {
+    let (left, right) = range.exclude(&excl).unwrap();
+
+    if let Some(left) = left {
+      mm::direct_map_memory(
+        kconfig.virtual_base,
+        kconfig.kernel_pages_start,
+        left.base,
+        left.size,
+        false,
+        &mut allocator,
+        MappingStrategy::Compact,
+      );
+    }
+
+    if let Some(right) = right {
+      mm::direct_map_memory(
+        kconfig.virtual_base,
+        kconfig.kernel_pages_start,
+        right.base,
+        right.size,
+        false,
+        &mut allocator,
+        MappingStrategy::Compact,
+      );
+    }
+  }
+}
+
+/// Initialize the ISR stacks.
+///
+/// # Parameters
+///
+/// * `allocator` - Page table and stack allocator.
+///
+/// # Description
+///
+/// Allocates SVC, ABT, IRQ, and FIQ for each secondary core, maps the stacks
+/// into the ISR stack area, and adds entries to the stack list. The primary
+/// core's stacks will have already been mapped to the end of the ISR stack
+/// area. Cores 1..N will be placed in the ISR stack area starting at the
+/// beginning.
+///
+/// # Assumptions
+///
+/// Assumes multiple cores.
+fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
+  let kconfig = get_kernel_config();
+  let core_config = get_device_tree().get_core_config();
+  let page_shift = get_page_shift();
+  let stack_size = kconfig.kernel_stack_pages << page_shift;
+  let step_size = (kconfig.kernel_stack_pages + 1) << page_shift;
+  let stack_area_base = get_isr_stack_area_virtual_base();
+
+  for (index, core) in core_config.get_cores().iter().enumerate() {
+    // Skip the primary core.
+    if index == 0 {
+      continue;
+    }
+
+    // Each stack list entry is the core ID + 4 stack addresses.
+    let entry_offset = (index * 5) << bits::WORD_SHIFT;
+    let ptr = (kconfig.virtual_base + kconfig.kernel_stack_list + entry_offset) as *mut usize;
+
+    unsafe {
+      *ptr = core.get_id();
+    }
+
+    // Calculate the virtual base address for the stacks.
+    let mut stack_vbase = stack_area_base + (step_size * 4 * (index - 1)) + (1 << page_shift);
+
+    for s in 1..=4 {
+      // We must successfully allocate a stack for each core.
+      let (stack_base, _) = allocator
+        .contiguous_alloc(kconfig.kernel_stack_pages)
+        .unwrap();
+
+      unsafe {
+        *ptr.add(s) = stack_vbase + stack_size;
+      }
+
+      // Map the core's stack into the ISR stack area.
+      mm::map_memory(
+        kconfig.virtual_base,
+        kconfig.kernel_pages_start,
+        stack_vbase,
+        stack_base,
+        stack_size,
+        false,
+        allocator,
+        MappingStrategy::Granular,
+      );
+
+      stack_vbase += step_size;
+    }
   }
 }
 
 #[cfg(feature = "module_tests")]
 pub fn run_tests(context: &mut test::TestContext) {
-  task::run_tests();
+  task::run_tests(context);
 }

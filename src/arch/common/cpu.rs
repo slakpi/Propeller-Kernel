@@ -102,23 +102,37 @@ impl CoreConfig {
   /// # Parameters
   ///
   /// * `core` - The core to add.
+  /// * `is_primary` - Is this the primary core?
+  ///
+  /// # Description
+  ///
+  /// The primary core is always given an index of 0.
   ///
   /// # Returns
   ///
   /// True if able to add the core, false otherwise.
-  pub fn add_core(&mut self, core: Core) -> bool {
+  pub fn add_core(&mut self, core: Core, is_primary: bool) -> bool {
     if self.core_count >= MAX_CORES {
       return false;
     }
 
     self.id_map.insert(core.id, self.core_count);
     self.cores[self.core_count] = core;
+
+    // The primary core must be at index zero.
+    if is_primary {
+      self.id_map.insert(self.cores[0].id, self.core_count);
+      self.id_map.insert(self.cores[self.core_count].id, 0);
+      self.cores.swap(0, self.core_count);
+    }
+
     self.core_count += 1;
     true
   }
 
   /// Reset the configuration.
   pub fn reset(&mut self) {
+    self.id_map.clear();
     self.core_count = 0;
   }
 

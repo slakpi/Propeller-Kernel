@@ -238,7 +238,9 @@ After enabling the MMU, the primary core fills out the ARM kernel configuration 
 
 #### CPU Initialization
 
-Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. `MPIDR` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
+Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. The primary core is the exception; it is always assigned index 0 regardless of its thread ID.
+
+`MPIDR` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
 
 ARM builds of Propeller are limited to [16 cores](#thread-local-area), and will only add the first 16 cores it encounters in the DTB to the core database.
 
@@ -283,9 +285,9 @@ When using a 3/1 split configuration, Propeller creates a Linear Memory area wit
     |.................| 0xffc0_0000     |    E
     | Page Database   | 24 MiB          |    L
     |.................| 0xfe40_0000     |
-    | Thread Local    |                 |    S
+    | ISR Stacks      |                 |    S
     |.................|                 |    E
-    | ISR Stacks      |                 |    G
+    | Thread Local    |                 |    G
     |.................|                 |    M
     |                 |                 |    E
     | Hardware Area   |                 |    N
@@ -367,6 +369,10 @@ The process is easily reversed to calculate a page physical address from a page 
 
 We are not worrying about NUMA architectures, just UMA. So, a model similar to the Linux SPARSEMEM model is not really necessary. This model is also similar to the Windows NT Page Frame Database circa 1990 per the Windows Research Kernel documents.
 
+##### ISR Stacks
+
+The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 4 stacks per core (SVC, ABT, IRQ, FIQ), a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 768 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
+
 ##### Thread Local Area
 
 The Thread Local area is reserved for mapping per-thread page tables that map upper memory beyond the linear mappings. Each kernel thread has its own Level 3-page table that is mapped when activating the thread and allows the thread to temporarily map 2 MiB of pages into the Thread Local area.
@@ -383,17 +389,27 @@ Threads store the physical address of their thread-local table in their context 
     +----+-----------+-----------+--------------+
     31  30          21          12              0
 
-##### ISR Stacks
-
-The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 4 stacks per core (SVC, ABT, IRQ, FIQ), a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 768 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
-
 ##### Hardware Area
 
 There is current nothing interesting going on here. Likely, Propeller will allow drivers to permanently map their devices into this area.
 
 #### Multi-Core Initialization
 
-See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference is that each ARM core will have SVC, ABT, IRQ, and FIQ entries in the kernel stack list. Otherwise, the concept is the same.
+See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference is that each ARM core will have SVC, ABT, IRQ, and FIQ entries in the kernel stack list. Otherwise, the multi-core initialization concepts are the same.
+
+    ...                         ...
+     +---------------------------+
+     | Core X SVC Stack Address  |
+     +---------------------------+ +16
+     | Core X ABT Stack Address  |
+     +---------------------------+ +12
+     | Core X IRQ Stack Address  |
+     +---------------------------+ +8
+     | Core X FIQ Stack Address  |
+     +---------------------------+ +4
+     | Core X Thread ID          |
+     +---------------------------+ virtual base + list address + 20 * X
+    ...                         ...
 
 ### AArch64 Implementation {#aarch64-arch-impl}
 
@@ -507,7 +523,9 @@ After enabling the MMU, the primary core fills out the AArch64 kernel configurat
 
 #### CPU Initialization
 
-Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. `MPIDR_EL1` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR_EL1` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
+Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. The primary core is the exception; it is always assigned index 0 regardless of its thread ID.
+
+`MPIDR_EL1` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR_EL1` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
 
 AArch64 builds of Propeller are limited to 256 cores, and will only add the first 256 cores it encounters in the DTB to the core database. Unlike the 16-core limitation on ARM builds, this is an arbitrary limitation. However, increasing it does increase the memory cost of the kernel's data structures.
 
@@ -568,39 +586,51 @@ The ISR Stacks area virtually maps each core's ISR stack with unmapped guard pag
 
 Before releasing secondary cores, Propeller allocates the ISR stacks, maps them into the ISR Stack area, and fills out the kernel stack list. The primary core's stack has already been configured, so the primary core's entry in the list is just left blank.
 
-     +---------------------------+ +8 * N
+Each entry in the kernel stack list is a pair of words: the thread ID of the core at that index and the core's stack pointer. The secondary cores will search the list for their hardware ID since obtaining their index is not trivial and requires a stack.
+
+     +---------------------------+
      | Core N ISR Stack Address  |
+     +---------------------------+ +16 * N + 8
+     | Core N Thread ID          |
+     +---------------------------+ +16 * N
     ...                         ...
-     | Core 3 ISR Stack Address  |
-     +---------------------------+ +24
+     +---------------------------+ +48
      | Core 2 ISR Stack Address  |
-     +---------------------------+ +16
+     +---------------------------+ +40
+     | Core 2 Thread ID          |
+     +---------------------------+ +32
      | Core 1 ISR Stack Address  |
+     +---------------------------+ +24
+     | Core 1 Thread ID          |
+     +---------------------------+ +16
+     | / / / / / / / / / / / / / |
      +---------------------------+ +8
      | / / / / / / / / / / / / / |
      +---------------------------+  virtual base + list address
 
-While the primary core's ISR stack is physically located in the kernel image, Propeller remaps it into the ISR Stack region with a guard page and updates the stack pointer. The stacks for the remaining cores are dynamically allocated and mapped into the ISR Stacks area once Propeller initializes the page allocators.
+While the primary core's ISR stack is physically located in the kernel image, Propeller remaps it into the ISR Stacks area with a guard page and updates the stack pointer. The stacks for the remaining cores are dynamically allocated and mapped into the ISR Stacks area once Propeller initializes the page allocators. The "step size" in the example below is the stack size plus one page.
 
-     +---------------------------+ +stack_virtual_offset * N
+Note that the primary core's stack starts at the end of the ISR stack area. This simplifies early setup of the primary core's stack when the number of cores is not known.
+
+     +---------------------------+ +step size
+     | Core 0 ISR Stack          |
+     +---------------------------+
+     | / / / / / Guard / / / / / |
+     +---------------------------+ +step size * N
      | Core N ISR Stack          |
      +---------------------------+
      | / / / / / Guard / / / / / |
      +---------------------------+
     ...                         ...
-     +---------------------------+
+     +---------------------------+ +step size * 2
      | Core 2 ISR Stack          |
      +---------------------------+
      | / / / / / Guard / / / / / |
-     +---------------------------+ +stack_virtual_offset * 2
+     +---------------------------+ +step size
      | Core 1 ISR Stack          |
      +---------------------------+
      | / / / / / Guard / / / / / |
-     +---------------------------+ +stack_virtual_offset
-     | Core 0 ISR Stack          |
-     +---------------------------+
-     | / / / / / Guard / / / / / |
-     +---------------------------+  virtual base + stack_base
+     +---------------------------+  ISR Stack area base
 
 After the ISR stacks have been allocated and mapped, Propeller will unpark the secondary cores by vectoring them to `_secondary_start`. 
 
