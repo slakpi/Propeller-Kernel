@@ -45,7 +45,7 @@ Refer to the [Architecture](doc/ARCHITECTURE.md) document for details on the ker
 
 QEMU expects the kernel to start at 0x10000 for Raspberry Pi 2.
 
-cargo run --config .cargo/config-qemu.toml --target armv7a-none-eabi -- --image kernel7.img
+    cargo run --config .cargo/config-qemu.toml --target armv7a-none-eabi -- --image kernel7.img
 
 ### 32-bit Cortex-A53 (Raspberry Pi 3) Hardware Build
 
