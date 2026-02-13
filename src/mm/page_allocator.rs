@@ -4,7 +4,7 @@
 mod tests;
 
 use crate::arch;
-use crate::arch::memory::MemoryRange;
+use crate::arch::memory::{BlockAllocator, FlexAllocator, MemoryRange, PageAllocator};
 use crate::support::bits;
 use crate::task::Task;
 #[cfg(feature = "module_tests")]
@@ -677,6 +677,36 @@ impl<'memory> BuddyPageAllocator<'memory> {
     self.flags[index] ^= 1 << bit_idx;
   }
 }
+
+impl<'memory> BlockAllocator for BuddyPageAllocator<'memory> {
+  /// See `BlockAllocator::contiguous_alloc`.
+  fn contiguous_alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
+    self.allocate(pages)
+  }
+
+  /// See `BlockAllocator::contiguous_free`.
+  fn contiguous_free(&mut self, addr: usize, pages: usize) {
+    self.free(addr, pages);
+  }
+}
+
+impl<'memory> PageAllocator for BuddyPageAllocator<'memory> {
+  /// See `PageAllocator::alloc`.
+  fn alloc(&mut self) -> Option<usize> {
+    if let Some((addr, _)) = self.allocate(1) {
+      return Some(addr);
+    }
+
+    None
+  }
+
+  /// See `PageAllocator::free`.
+  fn free(&mut self, addr: usize) {
+    self.free(addr, 1);
+  }
+}
+
+impl<'memory> FlexAllocator for BuddyPageAllocator<'memory> {}
 
 #[cfg(feature = "module_tests")]
 pub fn run_tests(context: &mut test::TestContext) {

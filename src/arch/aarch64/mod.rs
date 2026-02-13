@@ -9,13 +9,12 @@ pub use super::arm_common::{cpu, sync};
 pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
-use crate::arch::memory::{FlexAllocator, PageAllocator};
 use crate::support::{bits, dtb, range};
 #[cfg(feature = "module_tests")]
 use crate::test;
 use core::ptr;
 use memory::{
-  BlockAllocator, BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange,
+  BufferedPageAllocator, FlexAllocator, MappingStrategy, MemoryConfig, MemoryRange,
   MemoryRangeHandler, MemoryZone,
 };
 

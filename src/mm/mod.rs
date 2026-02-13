@@ -1,16 +1,12 @@
 //! Memory Management
 
-mod dyn_flex_allocator;
 mod page_allocator;
 
 use crate::arch;
-use crate::arch::memory::{
-  BlockAllocator, FlexAllocator, MemoryConfig, MemoryRange, MemoryZone, PageAllocator,
-};
+use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::support::bits;
 use crate::sync::{SpinLock, SpinLockGuard};
 use core::ptr;
-use dyn_flex_allocator::DynamicFlexAllocator;
 use page_allocator::BuddyPageAllocator;
 
 /// Tracks the overall memory ranges covered by each zone and the required
@@ -26,9 +22,6 @@ struct ZoneInfo {
 /// Per-core page buffer size.
 const PER_CORE_PAGE_BUFFER_SIZE: usize = 256;
 
-/// Convenience type for the per-core linear allocators.
-type PerCoreLinearAllocator = DynamicFlexAllocator<'static, PER_CORE_PAGE_BUFFER_SIZE>;
-
 /// Total number of zone allocators and their indices.
 const ZONE_ALLOCATOR_COUNT: usize = 2;
 
@@ -39,10 +32,6 @@ const HIGH_MEMORY_ALLOCATOR: usize = 1;
 /// Convenience initializer for the zone allocator array.
 const ZONE_ALLOCATOR_INITIALIZER: Option<SpinLock<BuddyPageAllocator>> = None;
 
-/// Convenience initializer for the per-core dynamic linear allocator array.
-const PER_CORE_ALLOCATOR_INITIALIZER: PerCoreLinearAllocator =
-  PerCoreLinearAllocator::new(get_linear_zone_allocator);
-
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
 
@@ -52,17 +41,6 @@ static mut ZONE_ALLOCATOR_MEMORY_CONFIG: MemoryConfig = MemoryConfig::new(Memory
 /// The zone allocators.
 static mut ZONE_ALLOCATORS: [Option<SpinLock<BuddyPageAllocator>>; ZONE_ALLOCATOR_COUNT] =
   [ZONE_ALLOCATOR_INITIALIZER; ZONE_ALLOCATOR_COUNT];
-
-/// The per-core dynamic allocators. These do not need to be protected by a spin
-/// lock.
-///
-///   TODO: This probably is not a great way to do this, 256 allocators that
-///         each buffer 256 pages comes to about 514 KiB. Might be able to just
-///         allocate a page for each being used to limit the struct size to
-///         a count, a page address, and maybe a slice reference for convenient
-///         access.
-static mut PER_CORE_ALLOCATORS: [PerCoreLinearAllocator; arch::cpu::MAX_CORES] =
-  [PER_CORE_ALLOCATOR_INITIALIZER; arch::cpu::MAX_CORES];
 
 /// Initialize the memory management module.
 ///
@@ -78,10 +56,17 @@ pub fn init() {
   init_allocators();
 }
 
-/// Get the per-core linear allocator for the current core.
-pub fn get_current_core_linear_allocator() -> &'static mut PerCoreLinearAllocator {
-  let core = arch::get_current_core_index();
-  unsafe { &mut ptr::addr_of_mut!(PER_CORE_ALLOCATORS).as_mut().unwrap()[core] }
+/// Get the global allocator for a memory zone.
+///
+/// # Parameters
+///
+/// * `zone` - The memory zone.
+pub fn get_zone_allocator(
+  zone: MemoryZone,
+) -> &'static mut Option<SpinLock<BuddyPageAllocator<'static>>> {
+  let index = get_zone_index(zone).unwrap();
+  let mut allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
+  &mut allocators[index]
 }
 
 /// Initialize the allocators.
@@ -249,12 +234,6 @@ fn get_zone_index(zone: MemoryZone) -> Option<usize> {
     MemoryZone::HighMemoryZone => Some(HIGH_MEMORY_ALLOCATOR),
     _ => None,
   }
-}
-
-/// Helper callback to get the linear zone allocator.
-fn get_linear_zone_allocator() -> &'static mut SpinLock<BuddyPageAllocator<'static>> {
-  let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
-  allocators[LINEAR_MEMORY_ALLOCATOR].as_mut().unwrap()
 }
 
 /// Run the memory management tests.
