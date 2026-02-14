@@ -12,7 +12,7 @@ Propeller *is still very much a toy kernel*, and it does share some code with RO
 
 ## Tutorial
 
-Refer to the full [Tutorial](https://slakpi.github.io/Propeller-Kernel/part_1.html) for detailed information about Propeller and the background of design decisions.
+Refer to the full [Tutorial](https://slakpi.github.io/Propeller-Kernel) for detailed information about Propeller and the background of design decisions.
 
 ## Architecture
 
