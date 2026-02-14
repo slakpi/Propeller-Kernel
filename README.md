@@ -10,9 +10,13 @@ Propeller *is still very much a toy kernel*, and it does share some code with RO
 * Changes to Propeller are tested in 32- and 64-bit builds on ARMv8 hardware as well as in 32-bit ARMv7 and 64-bit ARMv8 QEMU runs before they make it to main. This means the commits are more deliberate rather than stream of conscious and main always works.
 * Propeller uses only Cargo for building. However, it does also use a Python runner that creates a kernel image with `rust-objcopy` and an assembly listing with `rust-objdump`.
 
+## Tutorial
+
+Refer to the full [Tutorial](https://slakpi.github.io/Propeller-Kernel/part_1.html) for detailed information about Propeller and the background of design decisions.
+
 ## Architecture
 
-Refer to the [Architecture](doc/ARCHITECTURE.md) document for details on the kernel design.
+Refer to the [Architecture](doc/ARCHITECTURE.md) summary document for details on the kernel design.
 
 ## Building
 
