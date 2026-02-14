@@ -478,6 +478,11 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
       allocator,
       MappingStrategy::Granular,
     );
+
+    // Zero the stack.
+    unsafe {
+      ptr::write_bytes(stack_vbase as *mut u8, 0, stack_size);
+    }
   }
 }
 
