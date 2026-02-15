@@ -429,3 +429,8 @@ Open `asm.txt` and search for "Disassembly of section .text". You should see the
 `kernel8.img` is the actual kernel image that we can run in QEMU.
 
 But, for now, rejoice. You have built the world's dumbest kernel.
+
+I told you. Satisfying.
+
+-----
+[Part 3](https://slakpi.github.io/Propeller-Kernel/part_3.html)

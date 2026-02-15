@@ -81,4 +81,4 @@ So easy!
 Once you get going and feel like you might want to do an x86[_64] port as well, [Writing an OS in Rust](https://os.phil-opp.com/) by Philipp Oppermann can get you started. He actually seems to know what he is doing and even has an x86_64 boot loader you can use.
 
 -----
-[Part 2](https://slakpi.github.io/part_2.html)
+[Part 2](https://slakpi.github.io/Propeller-Kernel/part_2.html)
