@@ -2,17 +2,20 @@
 
 ## Introduction
 
-So, you want to explore writing your operating system and you want to do it in Rust? Cool, so did I. And, if you have not read it already, I will point you to OSDev's list of [Beginner Mistakes](https://wiki.osdev.org/Beginner_Mistakes). OSDev stresses the right things in that article: approach this with some achievable goals (learn about ARM system architecture, learn about Rust, etc.). Approach it with a desire to learn the *right* way to do things. *Do not* approach this with the initial goal of writing a complete operating system.
+So, you want to explore writing your own operating system and you want to do it in Rust? Cool, so did I. If you have not read it already, I will point you to OSDev's list of [Beginner Mistakes](https://wiki.osdev.org/Beginner_Mistakes). OSDev stresses the right things in that article: approach this with some achievable goals (learn about ARM system architecture, learn about Rust, etc.). Approach it with a desire to learn the *right* way to do things. *Do not* approach this with the initial goal of writing a complete operating system.
 
 > **NOTE**: I am *not* an expert in kernel design. I am trying to learn the right ways myself, so it is likely that some of the things I do in the tutorial are not the best way. Treat this tutorial accordingly. Be suspicious. If you find a better way to do something, [let me know](mailto://randy.widell@gmail.com)!
 
-I started by [translating](https://github.com/slakpi/ros) Raspberry Pi tutorials written in C to Rust, then expanded on them and cleaned up the code as I learned.
+I started by translating Raspberry Pi tutorials written in C to Rust, then expanded on them and cleaning up the code as I learned. That initial project, [ROS](https://github.com/slakpi/ros), quickly went off the rails for a variety of reasons.
 
-When JetBrains made RustRover freely available for non-commercial use, I decided to use it to force myself to remove [CMake](https://cmake.org/) and the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) from the project to go completely Cargo native.
+When JetBrains made RustRover freely available for non-commercial use, I decided to start over with Propeller. I had two main goals:
 
-That switch from CMake + [Corrosion](https://github.com/corrosion-rs/corrosion) + Cargo to just Cargo was not super easy and I still needed a C compiler, but I think it worked out nicely enough to put together a coherent tutorial on building a toy kernel with RustRover and Python for some build tooling.
+* Go Cargo native by removing [CMake](https://cmake.org/) and the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads).
+* Enforce a rule on myself that all changes to the kernel source have to be tested in QEMU and on hardware before I can push to main. As such, Propeller's main branch has cleaner commits and always works.
 
-Also, this tutorial's inclusion of 32-bit ARMv7 is a bit novel from what I have seen of toy kernel tutorials around the Internet. Relatively speaking, 64-bit is easy. In a world where 64-bit systems exist, 32-bit seems weird and hacky when you start learning about how virtual address spaces work.
+The switch from the CMake + [Corrosion](https://github.com/corrosion-rs/corrosion) + Cargo setup in ROS to just Cargo was not super easy and I still needed the ARM GNU toolchain for its assembler and debugger, but I think it worked out nicely enough to put together a coherent tutorial on building a toy kernel with RustRover + the ARM GNU toolchain + Python for some build tooling.
+
+This tutorial's inclusion of 32-bit ARM is a bit novel from what I have seen of toy kernel tutorials around the Internet. Relatively speaking, 64-bit is easy. In a world where 64-bit systems exist, 32-bit seems weird and hacky when you start learning about how virtual address spaces work.
 
 I decided to walk both paths for the simple pleasure of learning how 32-bit kernels dealt with the address space limitations. It was a good choice that led to some really interesting history lessons about the evolution of how Windows and Linux handled it.
 
@@ -26,12 +29,13 @@ There are a ton of existing tutorials, and I will give them credit in time. I do
 
 ### ARM GNU Toolchain
 
-Grab the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads). You want the `arm-none-eabi` and `aarch64-none-elf` variants for your host system.
+Grab the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads). You want the `arm-none-eabi` and `aarch64-none-elf` variants for your host system. They will be used to compile the assembly you write and you will use GDB for debugging.
 
-### ARM Documents
+### ARM Documents for Reference
 
-* [ARM Cortex-A Series Programmer's Guide for ARMv7-A](https://developer.arm.com/documentation/den0013/d/?lang=en)
-* [ARM Architecture Reference Manual for ARMv7-A and -R](https://developer.arm.com/documentation/ddi0406/cd/?lang=en)
+* [ARM Cortex-A Series Programmer's Guide for ARMv7-A](https://developer.arm.com/documentation/den0013/0400/)
+* [ARM Architecture Reference Manual for ARMv7-A and -R](https://developer.arm.com/documentation/ddi0406/latest)
+* [ARM Architecture Reference Manual for ARMv8-A and ARMv9-A](https://developer.arm.com/documentation/ddi0487/latest)
 
 ### Python
 
@@ -75,3 +79,6 @@ The Raspberry Pi, aside from being a cheap, fully-capable computer, has two nice
 So easy!
 
 Once you get going and feel like you might want to do an x86[_64] port as well, [Writing an OS in Rust](https://os.phil-opp.com/) by Philipp Oppermann can get you started. He actually seems to know what he is doing and even has an x86_64 boot loader you can use.
+
+-----
+[Part 2](https://slakpi.github.io/part_2.html)
