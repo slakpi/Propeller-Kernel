@@ -166,3 +166,30 @@ Did you get it to build?
 
 -----
 [Part 4](https://slakpi.github.io/Propeller-Kernel/part_4.html)
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js"></script>
+<script>
+  // Wait for the page to fully load
+  document.addEventListener('DOMContentLoaded', function() {
+    // Find all Markdown code blocks with class "language-mermaid"
+    const mermaidCodeBlocks = document.querySelectorAll('pre code.language-mermaid');
+ 
+    // Convert each code block into a Mermaid diagram
+    mermaidCodeBlocks.forEach(block => {
+      // Create a new div for Mermaid to render into
+      const mermaidDiv = document.createElement('div');
+      mermaidDiv.className = 'mermaid'; // Match the CSS class above
+      mermaidDiv.textContent = block.textContent; // Copy diagram code
+ 
+      // Replace the original code block with the Mermaid div
+      block.parentNode.replaceChild(mermaidDiv, block);
+    });
+ 
+    // Initialize Mermaid with default settings
+    mermaid.initialize({
+      startOnLoad: true, // Render diagrams when Mermaid loads
+      theme: 'default', // Use default theme (options: default, dark, forest, neutral)
+      logLevel: 3 // Suppress non-critical logs (0 = debug, 3 = error)
+    });
+  });
+</script>
