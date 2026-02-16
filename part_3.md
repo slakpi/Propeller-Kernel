@@ -136,6 +136,8 @@ Before the kernel can jump to any Rust code, it is going to have to do a lot of 
 
 We only have an AArch64 implementation so far. I'll tell you what. I'll give you the code for the ARM version of `_start`, and you use what you have learned so far to integrate it into the build.
 
+> *NOTE*: When loading a 32-bit kernel, the boot loader use by Raspberry Pi models 2 and 3 expects the file to be named kernel7.img. The boot loader on a Raspberry Pi 4 on expects the file to be named kernel7l.img.
+
 ```
 //! ARM Entry Point
 
