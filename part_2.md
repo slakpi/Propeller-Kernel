@@ -41,7 +41,7 @@ $HOME/.local/cross/gnu-arm-none-eabi
 $HOME/.local/cross/gnu-aarch64-none-elf
 ```
 
-The build tooling will use the [`cc`](https://docs.rs/cc/latest/cc/) crate to compile assembly files. So, let's set up a global Cargo configuration tells the `cc` crate where the compiler and archiver binaries are for each target.
+The build tooling will use the [`cc`](https://docs.rs/cc/latest/cc/) crate to compile assembly source. So, let's set up a global Cargo configuration tells the `cc` crate where the compiler and archiver binaries are for each target.
 
 Create the file `$HOME/.cargo/config.toml` and add the following lines (replace `<ARM_PATH>` and `<AARCH64_PATH>` with the root directories of the toolchains):
 
@@ -196,21 +196,21 @@ Here, we get a bit more specific with the flags we send to the Rust compiler.
 
 For AArch64:
 
-* Disable NEON SIMD instructions.
+* Disable [NEON SIMD](https://en.wikipedia.org/wiki/ARM_architecture_family#Advanced_SIMD_(Neon)) instructions.
 * Optimize for the Cortex-A53.
-* Start the kernel code at 0xffff_0000_0008_0000. QEMU's boot loader will jump to 0x8_0000 expecting to find the kernel code, but we need to specify the virtual address here (more on this later).
+* Start the kernel `.text` (code) section at 0xffff_0000_0008_0000. QEMU's boot loader will load the kernel starting at 0x8_0000, but we going to use virtual addresses for the binary layout (more on this later).
 
 For ARMv7a:
 
 * NEON intrinsics are not available in the `eabi` toolchain, so that's already taken care of.
 * Optimize for the Cortex-A7.
-* Start the kernel code at 0xc001_0000. QEMU differs from the Raspberry Pi boot loader here. The Raspberry Pi boot loader will expect the kernel code at 0x8000, but QEMU's boot loader expects it at 0x1_0000 Again, specify the virtual address here (more on this later).
+* Start the kernel `.text` (code) at 0xc001_0000. QEMU differs from the Raspberry Pi boot loader here. The Raspberry Pi boot loader will load the kernel starting at 0x8000, but QEMU's boot loader loads it starting at 0x1_0000. Again, specify the virtual address here (more on this later).
 
 The `[build]` section specifies the targets to build with the `cargo build` command.
 
-The `[env]` section provides the flags used when compiling assembly files with ARM toolchains. These flags are mostly just GCC equivalents of the Rust flags above.
+The `[env]` section provides the flags used when compiling assembly source with ARM toolchains. These flags are mostly just GCC equivalents of the Rust flags above.
 
-> *NOTE:* `-fPIC` generates position-independent code from the assembly source. This is important because we are telling the linker to use a virtual base address for the kernel. When compiled, the assembly code will use PC-relative addresses rather than absolute virtual addresses. While the MMU is off, virtual addresses will just point to Nowhereland.
+> *NOTE:* `-fPIC` generates position-independent code from the assembly source.
 
 > *NOTE:* `-march=armv7ve`? For the ARMv7a target, the configuration tells GCC to use the ARMv7ve architecture. This is really just ARMv7-A with Virtualization Extensions, i.e. the Cortex-A7 and Cortex-A53.
 
@@ -218,7 +218,7 @@ The `[env]` section provides the flags used when compiling assembly files with A
 
 We are inching closer to being able to build! Hang in there and just think about how satisfying the first build will be.
 
-Let's add the entry point assembly. Propeller keeps its architecture-dependent code under `<propeller>/src/arch`. Each architecture has a `start` module that contains all of the assembly code. You could write Rust [inline assembly](https://doc.rust-lang.org/reference/inline-assembly.html) with the `asm!` macro, however debugging pure assembly is much easier.
+Let's add the entry point assembly. Propeller keeps its architecture-dependent code under `<propeller>/src/arch`. Each architecture has a `start` module that contains all of the assembly source. You could write Rust [inline assembly](https://doc.rust-lang.org/reference/inline-assembly.html) with the `asm!` macro, however debugging pure assembly is much easier.
 
 Add the file `<propeller>/src/arch/aarch64/start/start.s`:
 
@@ -227,7 +227,7 @@ Add the file `<propeller>/src/arch/aarch64/start/start.s`:
 
 .section ".text.boot"
 
-///---------------------------------------------------------------------------
+///-----------------------------------------------------------------------------
 ///
 /// Kernel entry point.
 ///
@@ -244,16 +244,17 @@ _start:
   wfi
   b       1b
 
-section ".text"
+
+.section ".text"
 ```
 
-This very exciting assembly code defines a section named `.text.boot`, a global function named `_start` and another section named `.text`.
+This very exciting assembly defines a section named `.text.boot`, a global function named `_start` and another section named `.text`.
 
-The linker places executable code in the `.text*` sections. The `.text.boot` section is a subsection of `.text` that the linker script will place starting at the kernel base address. The linker will be free to arrange code in `.text` however it wants.
+The linker places executable code in the `.text` sections. The `.text.boot` section is a subsection of `.text` that the linker script will place starting at the kernel base address. The linker will be free to arrange code in `.text` however it wants.
 
 The `_start` function simply goes into an infinite loop using the `wfi` instruction to sleep until an interrupt occurs.
 
-Do not worry too much about the parameters passed to `_start`. When the boot loader calls `_start`, it will call it the registers set as specified. The ATAG/DTB blob is going to be a big topic later.
+Do not worry too much about the parameters passed to `_start`. When the boot loader calls `_start`, it will call it the registers set as specified. The [ATAG](http://www.simtec.co.uk/products/SWLINUX/files/booting_article.html#appendix_tag_reference)/[DTB](https://devicetree-specification.readthedocs.io/en/latest/) blob is going to be a big topic later.
 
 ## AArch64 Linker Script
 
@@ -294,6 +295,13 @@ SECTIONS
 }
 ```
 
+You can read more about the GNU linker script format [here](https://sourceware.org/binutils/docs/ld/Scripts.html#Scripts). But, just to help make sense of the script above:
+
+* As mentioned in the previous section, all executable code is placed in the `.text` sections and the script forces the `.text.boot` subsection to the beginning of the binary.
+* The `.rodata` section will contain any read-only constants generated by the compiler.
+* The `.data` section will contain any read-write global and static variables initialized to a value other than zero.
+* The `.bss` section will contain any read-write global and static variables initialized to zero.
+
 This very simple linker script does the following:
 
 `__page_size = 4096;` - We will talk about page sizes more later. For now, this is just a constant for aligning sections in the binary. It is not actually telling the processor to use 4 KiB pages.
@@ -308,15 +316,13 @@ This very simple linker script does the following:
 
 `ALIGN(__page_size)` - Moves the current position to a 4 KiB boundary. This is used to align sections and can also arbitrarily align the current position using `. = ALIGN(__page_size)`.
 
-> *NOTE:* The BSS section is the zero-initialized data section. The `__bss_start`, `__bss_end`, and `__bss_size` constants will make it easier to memset the BSS section to 0 later on.
-
-You can read more about the GNU linker script format [here](https://sourceware.org/binutils/docs/ld/Scripts.html#Scripts).
+> *NOTE:* The `__bss_start`, `__bss_end`, and `__bss_size` constants will make it easier to memset the BSS section to 0 later on.
 
 ## build.rs
 
 Believe it or not, Cargo is *still* unable to build the kernel!
 
-Cargo is a programmable build system, that uses, surprise!, Rust as its language. We need to provide Cargo with a build script that tells it how to compile the assembly files.
+Cargo is a programmable build system, that uses, surprise!, Rust as its language. We need to provide Cargo with a build script that tells it how to compile the assembly source.
 
 Add the file `<propeller>/build.rs`:
 
@@ -344,9 +350,9 @@ fn main() {
 }
 ```
 
-Cargo provides the `main` function with the target architecture through an environment variable. Once we know the target architecture, the script instantiates a `cc::Build` object and starts configuring it to compile the assembly files.
+Cargo provides the `main` function with the target architecture through an environment variable. Once we know the target architecture, the script instantiates a `cc::Build` object and starts configuring it to compile the assembly source.
 
-The last line in `main` tells `cc` to compile the assembly files.
+The last line in `main` tells `cc` to compile the assembly source.
 
 Let's add the `configure_for_aarch64` function:
 
@@ -373,11 +379,11 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
 }
 ```
 
-`AARCH64_START_FILES` is just an array where we will keep a list of the assembly files to compile.
+`AARCH64_START_FILES` is just an array where we will keep a list of the assembly source files to compile.
 
-The next line adds an include path for use later, and adds the list of assembly files to the build.
+The next line adds an include path for use later, and adds the list of assembly source files to the build.
 
-Build scripts communicate back to Cargo via `println!`, and the next couple of lines tell Cargo to rerun a build if the linker script or any of the assembly files change.
+Build scripts communicate back to Cargo via `println!`, and the next couple of lines tell Cargo to rerun a build if the linker script or any of the assembly source files change.
 
 ## RustRover Specifics
 
