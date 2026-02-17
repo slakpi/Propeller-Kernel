@@ -107,9 +107,11 @@ End of assembler dump.
 
 Hey! That's our infinite loop! How cool is that?
 
-Unfortunately, that is about all of the fun we can have right now. Using the `ni` command to step to the next instruction is just going to pause on wait-for-interrupt.
+Using the `ni` command to step to the next instruction is just going to pause on wait-for-interrupt, so there is not a whole lot of fun we can have with our kernel. While we are standing around here with nothing to do, why don't we...
 
-Actually, that's not true. Let's use the `info threads` command:
+## Just Poke at Things
+
+Let's use the `info threads` command:
 
 ```
 (gdb) info threads
@@ -134,7 +136,7 @@ CPU#0 is at 0x80000, which makes sense. But, what are CPU#1, 2, and 3 doing? It 
 (gdb)
 ```
 
-Let's disassemble...I don't know, choose a random number, say...3 instructions (12 bytes):
+Let's use the `disassemble` command to view the next...I don't know, choose a random number, say...3 instructions (12 bytes):
 
 ```
 (gdb) disassemble 0x30c,0x318
@@ -181,7 +183,7 @@ Let's step through the instructions:
 
 So, we looped back to 0x30c. The value at the address CPU#1 is examining must be zero.
 
-What is that address anyway? Let's examine the registers:
+What is that address anyway? Let's examine the registers with the `p` (print) command using hexadecimal (x) formatting:
 
 ```
 (gdb) p/x $x5
@@ -211,7 +213,7 @@ $14 = 0x3
 (gdb)
 ```
 
-It looks like CPU#2 and 3 are reading from 0xe8 and 0xf0. Out of total curiosity, what if we write the kernel start address to 0xe0.
+It looks like CPU#2 and 3 are reading from 0xe8 and 0xf0. Out of total curiosity, what if we write the kernel start address to 0xe0? Let's use the `set` command with a C-style cast and dereference to assign a value to the address. We can then use the `x` (examine) command to display 1 gigantic (g) word in hexadecimal (x).
 
 ```
 (gdb) set *((int*)0xe0) = 0x80000
@@ -246,18 +248,12 @@ Thread 2 hit Breakpoint 1, 0x0000000000080000 in ?? ()
 (gdb)
 ```
 
-HOLY COW! We just went multi-threaded! CPU#1 is now running the kernel as well!
+We just went multi-threaded! CPU#1 is now running the kernel as well!
 
 ## Parking Spaces
 
-OK, that was fun and I really only took you down that path because it was a fun way to demonstrate some very useful GDB commands.
-
-Listen carefully: You *do not* want to go multi-threaded this early. Refer back to the Linux [AArch64](https://www.kernel.org/doc/Documentation/arm64/booting.txt) boot protocol.
-
-Linux requires that the boot loader "park" all but one core and disable all interrupts before jumping the "primary" core to kernel. The boot loader parks the "secondary" cores by putting them into a loop that checks a table for a jump address. Each processor has its own entry in the table (the index value in $x6).
+Refer back to the Linux [AArch64](https://www.kernel.org/doc/Documentation/arm64/booting.txt) boot protocol. Linux requires that the boot loader "park" all but one core and disable all interrupts before jumping the "primary" core to kernel. The boot loader parks the "secondary" cores by putting them into a loop that checks a table for a jump address. Each core has its own entry in the table (the index value in $x6).
 
 Where the table is located and how we go about bringing the cores up is a topic for much later.
 
-It is very important that our kernel be purely single-threaded until we perform critical set up steps.
-
-But, you have glimpsed the future and hopefully learned a bit about debugging with QEMU and GDB!
+For now, the key takeaway is that the boot loader is going to ensure that the kernel is single-threaded. Only one core will be running and interrupts will be disabled. This gives us a chance to do initialization work without having to worry about synchronization.
