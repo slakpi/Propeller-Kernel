@@ -33,19 +33,19 @@ Cargo uses `rustc` to compile the Rust source and uses the `build.rs` script to 
 
 The linker uses the architecture `start.ld` script to link the object files into a binary.
 
-Finally, the `post-build.py` script uses `rust-objcopy` from `cargo-binutils` to produce a raw binary image of the kernel.
+Finally, the `post-build.py` script uses `rust-objcopy` from `cargo-binutils` to produce a raw kernel image.
 
-This raw binary can be dropped onto a SD card and booted by a Raspberry Pi, or loaded into QEMU. We will try this in Part 4 to introduce debugging.
+This raw image can be dropped onto a SD card and booted by a Raspberry Pi, or loaded into QEMU. We will try this in Part 4 to introduce debugging.
 
 ## No Floating-Point or SIMD
 
-We talked about using the software floating-point targets and disabling [NEON SIMD](https://en.wikipedia.org/wiki/ARM_architecture_family#Advanced_SIMD_(Neon)). When user code traps into the kernel for a [system call](https://en.wikipedia.org/wiki/System_call), we can save a great deal of time by not saving/restoring the floating-point and SIMD registers to/from memory *IF* we can guarantee that the kernel will not modify them.
+We are using the software floating-point targets and disabling [NEON SIMD](https://en.wikipedia.org/wiki/ARM_architecture_family#Advanced_SIMD_(Neon)). When user code traps into the kernel for a [system call](https://en.wikipedia.org/wiki/System_call), we can save a great deal of time by not saving/restoring the floating-point and SIMD registers to/from memory *IF* we can guarantee that the kernel will not modify them.
 
-Using the software floating-point toolchains and disabling SIMD will ensure that compiler does not use vectorization optimizations and any use of floating-point or SIMD instructions will raise an exception.
+Using the software floating-point targets and disabling SIMD will ensure that compiler does not use vectorization optimizations, and any use of floating-point or SIMD instructions will raise an exception.
 
 ## Virtual Addresses
 
-We talked about specifying the base address of the kernel as a virtual address.
+We specified the kernel base address as a virtual address.
 
 I highly recommend reading this primer on [virtual addressing](https://diveintosystems.org/book/C13-OS/vm.html) and this tutorial on AArch64 [address translation](https://github.com/s-matyukevich/raspberry-pi-os/blob/master/docs/lesson06/rpi-os.md) if virtual addressing is new to you.
 
@@ -88,32 +88,32 @@ For AArch64, the 64-bit virtual address space will look like:
     |                 |
     +-----------------+ 0x0000_0000_0000_0000
 
-Yep. The kernel and every user task get 256 TiB of virtual address space. 16,776,704 TiB (just under the full 16 EiB) of address space lay unused.
+Yep. The kernel and every user task get 256 TiB of virtual address space. 16,776,704 TiB (just under the full 16 EiB) of address space is unused.
 
-In both the ARM and AArch64 cases, the kernel's virtual addresses will be in the upper portion of the address space when the MMU is *ON*. We specified the virtual base address of the kernel in the layout of the image anticipating this.
+In both cases, the kernel's virtual addresses will be in the upper portion of the address space when the MMU is *ON*. We specified the virtual base address of the kernel in the layout of the image anticipating this.
 
 However, per the Linux boot protocols used by the Raspberry Pi, the MMU will be *OFF* at boot, and regardless of what we specify in the linker script, the Raspberry Pi and QEMU boot loaders are going to load the kernel to a physical address that is decidedly not the same as the virtual address. In the case of a 32-bit kernel, the Raspberry Pi loads the kernel starting at 0x8000 and QEMU loads the kernel starting at 0x1_0000. In the case of a 64-bit kernel, both load the kernel starting at 0x8_0000.
 
 The boot loader is just going to set the [`PC`](https://en.wikipedia.org/wiki/Program_counter) to the starting *physical* address, and the processor is just going to increment the `PC` as it reads instructions. No big deal so far.
 
-What if the kernel code wants to perform a jump or load some data, though? We told the linker to use virtual addresses. If the processor tries to jump to or load from an absolute virtual address it is going to end up halting on a bad address.
+What if the kernel code wants to perform a jump or load some data, though? We told the linker to use virtual addresses, so any assembly that uses absolute addresses is going to try to use a virtual address. If the processor tries to jump to or load from an absolute virtual address it is going to end up halting on a bad address.
 
-This is where the `-fPIC` option to generate position-independent code from the architecture assembly source comes in. The compiler will generate code that jumps to or loads from addresses calculated by adding an offset computed at compile-time to the `PC`. The early boot code does not have to know anything about virtual or physical address; it just has to deal in offsets! 
+This is where the `-fPIC` option to generate position-independent code from the architecture assembly source comes in. The compiler will generate code that jumps to or loads from addresses calculated by adding an offset computed at compile-time to the `PC` at run time. The early boot code does not have to know anything about virtual or physical address; it just has to deal in offsets!
 
 ## Kernel Image Layout
 
 To review, our kernel image has the following layout so far:
 
     +-----------------+
-    | / / / / / / / / | (page alignement)
+    | / / / / / / / / | (page alignment)
     |.................|
     | .bss            |
     |.................|
-    | / / / / / / / / | (page alignement)
+    | / / / / / / / / | (page alignment)
     |.................|
     | .data           |
     |.................|
-    | / / / / / / / / | (page alignement)
+    | / / / / / / / / | (page alignment)
     |.................|
     | .rodata         |
     |.................|
@@ -132,11 +132,15 @@ We will add a few more things to the linker script as we go, but this is pretty 
 
 Before the kernel can jump to any Rust code, it is going to have to do a lot of set up to meet the expectations of the Rust compiler. For example, Rust code assumes it has a stack. Where is the stack? Surely there is a stack somewhere! Well...no. I mean, yes...there's probably a pool of memory out there, but our kernel is in a dark cave at the moment with a woefully incomplete map of the system. Right now, that map is just a few constants provided by the linker script.
 
+Some of our next tasks are going to be setting aside some room in the kernel image for an initial stack, writing some very basic functions to set up the MMU, and then jump into Rust code.
+
+Setting up the initial stack will be surprisingly interesting!
+
 ## ARM?
 
-We only have an AArch64 implementation so far. I'll tell you what. I'll give you the code for the ARM version of `_start`, and you use what you have learned so far to integrate it into the build.
+We only have an AArch64 implementation so far. Why not take this opportunity to see if you can apply what you have learned so far to get an ARM build working?
 
-> *NOTE*: When loading a 32-bit kernel, the boot loader use by Raspberry Pi models 2 and 3 expects the file to be named kernel7.img. The boot loader on a Raspberry Pi 4 on expects the file to be named kernel7l.img.
+The ARM version of the infinite loop `_start` function is exactly the same, but take note for the future that the parameters are different:
 
 ```
 //! ARM Entry Point
@@ -162,7 +166,9 @@ _start:
 .section ".text"
 ```
 
-OK, that's probably anti-climactic since the instructions are the same. I'll give you another hint: the linker script is the same for now. You can just copy it over.
+You can also reuse the AArch64 linker script verbatim.
+
+One big difference: When loading a 32-bit kernel, the boot loader used by Raspberry Pi models 2 and 3 expects the file to be named kernel7.img. The boot loader on a Raspberry Pi 4 on expects the file to be named kernel7l.img.
 
 Did you get it to build?
 

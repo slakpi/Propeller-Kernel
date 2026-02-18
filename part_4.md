@@ -32,7 +32,7 @@ The first line in each file loads the symbols from the propeller binary so that 
 
 The second line connects to QEMU on port 9000.
 
-The last line sets a breakpoint at the beginning of the kernel.
+The last line sets a breakpoint at the beginning of the kernel. Notice that we are using the physical address here.
 
 ## Starting QEMU
 
@@ -94,7 +94,7 @@ Thread 1 hit Breakpoint 1, 0x0000000000080000 in ?? ()
 
 Are you excited yet? Your kernel is running!
 
-Let's do a disassembly. ARM and AArch64 instructions are 32-bits, so let's disassemble the range 0x80000 - 0x80008:
+Let's do a disassembly. ARM and AArch64 instructions are 32-bits, so let's use the `disassemble` command to disassemble the range 0x8_0000 - 0x8_0008:
 
 ```
 (gdb) disassemble 0x80000,0x80008
@@ -107,7 +107,7 @@ End of assembler dump.
 
 Hey! That's our infinite loop! How cool is that?
 
-Using the `ni` command to step to the next instruction is just going to pause on wait-for-interrupt, so there is not a whole lot of fun we can have with our kernel. While we are standing around here with nothing to do, why don't we...
+Using the `ni` command to step to the next instruction is just going to pause on wait-for-interrupt, so there is not a whole lot of fun we can have with our kernel. While we are just standing around here with nothing to do, however, why don't we...
 
 ## Just Poke at Things
 
@@ -125,7 +125,7 @@ Let's use the `info threads` command:
 
 Four hardware threads!? Yep. The Cortex-A7 and Cortex-A53 are quad-core, [symmetric multiprocessors](https://en.wikipedia.org/wiki/Symmetric_multiprocessing).
 
-CPU#0 is at 0x80000, which makes sense. But, what are CPU#1, 2, and 3 doing? It seems like there is a party at 0x30c that CPU#0 was not invited to!? Let's go over and check out what they are doing.
+CPU#0 is currently stopped at 0x8_0000, which makes sense. But, what are CPU#1, 2, and 3 doing? It seems like there is a party at 0x30c that CPU#0 was not invited to!? Let's go over and check out what they are doing.
 
 `t 2` will switch us to thread 2.
 
@@ -136,7 +136,7 @@ CPU#0 is at 0x80000, which makes sense. But, what are CPU#1, 2, and 3 doing? It 
 (gdb)
 ```
 
-Let's use the `disassemble` command to view the next...I don't know, choose a random number, say...3 instructions (12 bytes):
+Let's disassemble the next...I don't know, choose a random number, say...3 instructions (12 bytes):
 
 ```
 (gdb) disassemble 0x30c,0x318
@@ -213,7 +213,7 @@ $14 = 0x3
 (gdb)
 ```
 
-It looks like CPU#2 and 3 are reading from 0xe8 and 0xf0. Out of total curiosity, what if we write the kernel start address to 0xe0? Let's use the `set` command with a C-style cast and dereference to assign a value to the address. We can then use the `x` (examine) command to display 1 gigantic (g) word in hexadecimal (x).
+It looks like CPU#2 and 3 are reading from 0xe8 and 0xf0. Out of total curiosity, what if we write the kernel start address to 0xe0? Let's use the `set` command with a C-style cast and dereference to assign a value to the address. We can then use the `x` (examine) command to display 1 gigantic (g) word using hexadecimal (x).
 
 ```
 (gdb) set *((int*)0xe0) = 0x80000
@@ -248,12 +248,14 @@ Thread 2 hit Breakpoint 1, 0x0000000000080000 in ?? ()
 (gdb)
 ```
 
-We just went multi-threaded! CPU#1 is now running the kernel as well!
+Woah! We just went multi-threaded! CPU#1 is now running the kernel as well!
 
 ## Parking Spaces
+
+Not only did we learn some useful GDB commands, we also learned something very interesting about the state of the cores at boot!
 
 Refer back to the Linux [AArch64](https://www.kernel.org/doc/Documentation/arm64/booting.txt) boot protocol. Linux requires that the boot loader "park" all but one core and disable all interrupts before jumping the "primary" core to kernel. The boot loader parks the "secondary" cores by putting them into a loop that checks a table for a jump address. Each core has its own entry in the table (the index value in $x6).
 
 Where the table is located and how we go about bringing the cores up is a topic for much later.
 
-For now, the key takeaway is that the boot loader is going to ensure that the kernel is single-threaded. Only one core will be running and interrupts will be disabled. This gives us a chance to do initialization work without having to worry about synchronization.
+For now, the key takeaway is that the boot loader is going to ensure that the kernel is single-threaded on boot. Only one core will be running and interrupts will be disabled. This gives us a chance to do initialization work without having to worry about synchronization.

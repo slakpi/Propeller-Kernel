@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This is going to be a whirlwind. The goal of Part 2 is to get the tooling setup to build a *minimal* kernel: a simple infinite loop. However, getting there is going to involve a lot of steps.
+This is going to be a whirlwind. The goal of Part 2 is to set up the tooling to build a *minimal* kernel: a simple infinite loop. However, getting there is going to involve a lot of steps.
 
 Pay attention to the tooling more than any actual code. Part 3 will take a step back and reflect on some major kernel concepts before the tutorial moves forward.
 
@@ -15,7 +15,7 @@ $ rustup target add aarch64-unknown-none-softfloat
 $ rustup target add armv7a-none-eabi
 ```
 
-> *NOTE:* Notice the use of the software floating-point targets (ARM eabi vs. eabihf, and AArch64 softfloat),  Propeller avoids floating-point operations in the kernel to avoid the need to save floating-point registers during system calls and interrupts. Later in this part, we will also disable NEON SIMD for the same reason.
+> *NOTE:* Notice the use of the software floating-point targets (ARM eabi vs. eabihf and AArch64 softfloat). Propeller avoids floating-point operations in the kernel to avoid the need to save floating-point registers during system calls and interrupts. Later in this part, we will also disable NEON SIMD for the same reason.
 
 The build tooling is also going to need the [`llvm-tools`](https://internals.rust-lang.org/t/llvm-tools-a-new-rustup-component-for-binary-inspection-objdump-nm-size-and-profiling-profdata/7830) component for `rustup`. Run:
 
@@ -23,10 +23,10 @@ The build tooling is also going to need the [`llvm-tools`](https://internals.rus
 $ rustup component add llvm-tools
 ```
 
-Install [`cargo-binutils`](https://github.com/rust-embedded/cargo-binutils):
+Next, install [`cargo-binutils`](https://github.com/rust-embedded/cargo-binutils):
 
 ```
-$ cargo install cargo-bintuils
+$ cargo install cargo-binutils
 ```
 
 `cargo-binutils`, built on `llvm-tools`, installs utilities such as `rust-objcopy` and `rust-objdump` that the build tooling will use to create the raw kernel image and disassembly listing.
@@ -35,13 +35,10 @@ $ cargo install cargo-bintuils
 
 On UNIX-like systems, I usually put the ARM toolchains in:
 
-```
-$HOME/.local/cross/gnu-arm-none-eabi
+* ARM: `$HOME/.local/cross/gnu-arm-none-eabi`
+* AArch64: `$HOME/.local/cross/gnu-aarch64-none-elf`
 
-$HOME/.local/cross/gnu-aarch64-none-elf
-```
-
-The build tooling will use the [`cc`](https://docs.rs/cc/latest/cc/) crate to compile assembly source. So, let's set up a global Cargo configuration tells the `cc` crate where the compiler and archiver binaries are for each target.
+The build tooling will use the [`cc`](https://docs.rs/cc/latest/cc/) crate to compile assembly source, so let's set up a global Cargo configuration tells the `cc` crate where the compiler and archiver binaries are for each target.
 
 Create the file `$HOME/.cargo/config.toml` and add the following lines (replace `<ARM_PATH>` and `<AARCH64_PATH>` with the root directories of the toolchains):
 
@@ -63,11 +60,11 @@ $ cargo new --bin propeller
 
 This is going to create a binary that depends on the Rust standard library: your run-of-the-mill executable. Once you create the new project, open it in RustRover.
 
-Now, the new project builds a run-of-the-mill executable with a familiar "Hello, World!" `main` function. But, we don't want a run-of-the-mill executable. We want a bare-metal superstar, an unconstrained master of its domain.
+Now, the new project builds a run-of-the-mill executable with a familiar "Hello, World!" `main` function. But, we don't want a run-of-the-mill executable. We want a bare-metal superstar. An unconstrained master of its domain.
 
 ## no_std
 
-Go ahead and delete the `main` function Cargo creates in `<propeller>/src/main.rs` and let's build out some minimal Rust code:
+Go ahead and delete the `main` function Cargo creates in `<propeller>/src/main.rs`, and add the following minimal Rust code:
 
 ```rust
 //! Propeller Rustland Entry Point.
@@ -78,8 +75,8 @@ Go ahead and delete the `main` function Cargo creates in `<propeller>/src/main.r
 // No main entry point.
 #![no_main]
 
-// When debug assertions are enabled (i.e. this is a debug build),
-// allow unused variables and code.
+// When debug assertions are enabled (i.e., this is a debug build), allow unused
+// variables and code.
 #![cfg_attr(debug_assertions, allow(unused))]
 
 use core::panic::PanicInfo;
@@ -91,12 +88,12 @@ use core::panic::PanicInfo;
 /// * `info` - Information about the panic.
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-   // Busy halt
+  // Busy halt
   loop {}
 }
 ```
 
-The `#![no_std]` directive tells the compiler to use the dependency-free Rust [`core`](https://doc.rust-lang.org/stable/core/index.html) library instead of the standard library. As noted in the documentation for `core`, it does not include any features that use dynamic memory, concurrency, I/O, etc. These are features that require an operating system: the thing we are building.
+The `#![no_std]` directive tells the compiler to use Rust's dependency-free [`core`](https://doc.rust-lang.org/stable/core/index.html) library instead of the standard library. As noted in the documentation for `core`, it does not include any features that use dynamic memory, concurrency, I/O, etc. These are features that require an operating system: the thing we are building.
 
 The `#![no_main]` directive tells the linker not to expect a `main` function. This will be handled by a custom linker script later.
 
@@ -124,7 +121,7 @@ panic = "abort"
 cc = "1.0"
 ```
 
-Without the standard library, using Rust's normal stack-unwinding panic recover is not possible.
+Without the standard library, using Rust's normal stack-unwinding panic recovery is not possible. However, the panic handler will give us a chance to examine what happened.
 
 Do not bother trying to build yet. We are still just getting started.
 
@@ -161,7 +158,7 @@ runner = ".venv/bin/python support/post-build.py"
 
 The `[target.<target>]` sections specify Rust compiler options for individual targets. Each target uses `rustflags` to specify a GNU linker script that details the layout of the kernel image.
 
-Each target also specifies `post-build.py` as the "runner" for the target. `cargo build` will build the kernel, but we can use the post-build script as the "runner" to create the raw image and disassembly listing.
+Each target also specifies `post-build.py` as the "runner" for the target. This will hijack the `cargo run` command to create the raw image and disassembly listing from the `cargo build` output.
 
 Let's also create a configuration file for QEMU. Create another configuration file called `<propeller>/.cargo/config-qemu.toml`. This file will inherit the project and global `config.toml`.
 
@@ -192,13 +189,13 @@ CFLAGS_aarch64_unknown_none_softfloat = "-mcpu=cortex-a53 -march=armv8-a+nofp+no
 CFLAGS_armv7a_none_eabi = "-mcpu=cortex-a7 -march=armv7ve -fPIC"
 ```
 
-Here, we get a bit more specific with the flags we send to the Rust compiler.
+This configuration gets a bit more specific with the Rust compiler flags.
 
 For AArch64:
 
 * Disable [NEON SIMD](https://en.wikipedia.org/wiki/ARM_architecture_family#Advanced_SIMD_(Neon)) instructions.
 * Optimize for the Cortex-A53.
-* Start the kernel `.text` (code) section at 0xffff_0000_0008_0000. QEMU's boot loader will load the kernel starting at 0x8_0000, but we going to use virtual addresses for the binary layout (more on this later).
+* Start the kernel `.text` (code) section at 0xffff_0000_0008_0000. QEMU's boot loader will load the kernel starting at 0x8_0000, but we going to use virtual addresses for the layout of the kernel image (more on this later).
 
 For ARMv7a:
 
@@ -218,7 +215,7 @@ The `[env]` section provides the flags used when compiling assembly source with 
 
 We are inching closer to being able to build! Hang in there and just think about how satisfying the first build will be.
 
-Let's add the entry point assembly. Propeller keeps its architecture-dependent code under `<propeller>/src/arch`. Each architecture has a `start` module that contains all of the assembly source. You could write Rust [inline assembly](https://doc.rust-lang.org/reference/inline-assembly.html) with the `asm!` macro, however debugging pure assembly is much easier.
+Let's add the entry point assembly. Propeller keeps its architecture-dependent code under `<propeller>/src/arch`. Each architecture has a `start` module that contains its assembly source. You could write Rust [inline assembly](https://doc.rust-lang.org/reference/inline-assembly.html) with the `asm!` macro, however debugging pure assembly is much easier in my experience.
 
 Add the file `<propeller>/src/arch/aarch64/start/start.s`:
 
@@ -250,11 +247,11 @@ _start:
 
 This very exciting assembly defines a section named `.text.boot`, a global function named `_start` and another section named `.text`.
 
-The linker places executable code in the `.text` sections. The `.text.boot` section is a subsection of `.text` that the linker script will place starting at the kernel base address. The linker will be free to arrange code in `.text` however it wants.
+The linker places executable code in the `.text` sections, but is free to order the code however it pleases. `_start` is in the `.text.boot` subsection so that the linker script can ensure `_start` is placed at the kernel base address.
 
-The `_start` function simply goes into an infinite loop using the `wfi` instruction to sleep until an interrupt occurs.
+The `_start` function simply goes into an infinite loop. The `wfi` instruction idles the processor until an interrupt event occurs.
 
-Do not worry too much about the parameters passed to `_start`. When the boot loader calls `_start`, it will call it the registers set as specified. The [ATAG](http://www.simtec.co.uk/products/SWLINUX/files/booting_article.html#appendix_tag_reference)/[DTB](https://devicetree-specification.readthedocs.io/en/latest/) blob is going to be a big topic later.
+Do not worry too much about the parameters passed to `_start`. When the boot loader calls `_start`, it will call it with the registers set as specified. The [ATAG](http://www.simtec.co.uk/products/SWLINUX/files/booting_article.html#appendix_tag_reference)/[DTB](https://devicetree-specification.readthedocs.io/en/latest/) blob is going to be a big topic later.
 
 ## AArch64 Linker Script
 
@@ -295,26 +292,23 @@ SECTIONS
 }
 ```
 
-You can read more about the GNU linker script format [here](https://sourceware.org/binutils/docs/ld/Scripts.html#Scripts). But, just to help make sense of the script above:
+You can read more about the GNU linker script format [here](https://sourceware.org/binutils/docs/ld/Scripts.html#Scripts). But, here is a brief overview:
 
-* As mentioned in the previous section, all executable code is placed in the `.text` sections and the script forces the `.text.boot` subsection to the beginning of the binary.
-* The `.rodata` section will contain any read-only constants generated by the compiler.
-* The `.data` section will contain any read-write global and static variables initialized to a value other than zero.
-* The `.bss` section will contain any read-write global and static variables initialized to zero.
+`__page_size = 4096;` We will talk about page sizes more later. For now, this is just a constant for aligning sections in the kernel image. It is not actually telling the processor to use 4 KiB pages.
 
-This very simple linker script does the following:
+`ENTRY(_start)` tells the linker that `_start` is the kernel entry point.
 
-`__page_size = 4096;` - We will talk about page sizes more later. For now, this is just a constant for aligning sections in the binary. It is not actually telling the processor to use 4 KiB pages.
+`SECTIONS` defines the section layout in the kernel image.
 
-`ENTRY(_start)` - Tells the linker that `_start` is the kernel entry point.
+As mentioned in the previous section, all executable code is placed in the `.text` sections. `KEEP(*(.text.boot))` tells the linker not to discard the `.text.boot` section. Placing `.text.boot` first in the `.text` section forces our `_start` function to be placed at the beginning of the kernel image.
 
-`SECTIONS` - Defines the section layout in the binary.
+`ALIGN(__page_size)` moves the current position to a 4 KiB boundary. This is used to align sections and can also arbitrarily align the current position using `. = ALIGN(__page_size)`.
 
-`KEEP(*(.text.boot))` - Tells the linker not to discard the `.text.boot` section and to place it at the beginning of the binary.
+The `.rodata` section will contain any read-only constants generated by the compiler.
 
-`*(.text)` - Place the rest of `.text` after `.text.boot`.
+The `.data` section will contain any read-write global and static variables initialized to a value other than zero.
 
-`ALIGN(__page_size)` - Moves the current position to a 4 KiB boundary. This is used to align sections and can also arbitrarily align the current position using `. = ALIGN(__page_size)`.
+The `.bss` section will contain any read-write global and static variables initialized to zero.
 
 > *NOTE:* The `__bss_start`, `__bss_end`, and `__bss_size` constants will make it easier to memset the BSS section to 0 later on.
 
@@ -423,7 +417,7 @@ You should find the following files under `<propeller>/target/aarch64-unknown-no
 
 Open `asm.txt` and search for "Disassembly of section .text". You should see the `_start` function listed with the `wfi` and `b` instructions.
 
-You could run this in QEMU, and you will. But, for now, take a breath and rejoice. You have built the world's dumbest kernel.
+We could run this in QEMU, and we will. But, for now, take a breath and rejoice. You have built the world's dumbest kernel.
 
 Yeah. I told you it would be satisfying.
 
