@@ -127,7 +127,7 @@ Do not bother trying to build yet. We are still just getting started.
 
 ## Post-Build Python Script
 
-Propeller uses a [post-build script](https://github.com/slakpi/Propeller-Kernel/blob/999066fd38e1c0fac8e593a8dc15306c2ec2d2cd/support/post-build.py) to generate the raw kernel image and disassembly listing. You can place this script in `<propeller>/support`.
+Propeller uses a [post-build script](https://github.com/slakpi/Propeller-Kernel/blob/main/support/post-build.py) to generate the raw kernel image and disassembly listing. You can place this script in `<propeller>/support`.
 
 ## Project Cargo Configurations
 
@@ -284,7 +284,6 @@ SECTIONS
   {
     __bss_start = .;
     *(.bss .bss.*)
-    . = ALIGN(__page_size);
     __bss_end = .;
   }
   

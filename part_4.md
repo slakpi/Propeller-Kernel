@@ -259,3 +259,6 @@ Refer back to the Linux [AArch64](https://www.kernel.org/doc/Documentation/arm64
 Where the table is located and how we go about bringing the cores up is a topic for much later.
 
 For now, the key takeaway is that the boot loader is going to ensure that the kernel is single-threaded on boot. Only one core will be running and interrupts will be disabled. This gives us a chance to do initialization work without having to worry about synchronization.
+
+-----
+[Part 5](https://slakpi.github.io/Propeller-Kernel/part_5.html)
