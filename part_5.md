@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Let's get down to some real work. This part of the tutorial is going to center around getting the MMU enabled and jumping in to Rust code. Since there is a relatively large amount of assembly code involved, I am just going to provide pseudocode here and links to the actual Propeller code.
+Let's get down to some real work. This part of the tutorial is going to center around getting ready to enable the MMU and jump in to Rust code. Since there is a relatively large amount of assembly code involved, I am just going to provide pseudocode here and links to the actual Propeller code.
 
 ## Modes, Privilege Levels, and Exception Levels
 
@@ -256,6 +256,93 @@ At [start.s:73](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aa
 ## Primary Core Boot
 
 Phew! You know what, that was a lot. Take a breath...
+
+OK, back to work.
+
+Let’s set up the stack pointer with the physical address of the stack area that we reserved in the linker script. For AArch64, this is going to be easy. For ARM, however, is a little weird at first.
+
+We discussed PC-relative addresses in Part 3 and how the assembly code would use offsets for jumping and loading. To set up the stack pointer, however, we need the *absolute physical* address.
+
+The AArch64 instruction `adrp` loads the absolute address from a PC-relative offset within +/- 4 GiB. For AArch64, we simply get the absolute physical address and set the pointers:
+
+```assembly
+.global primary_core_boot
+primary_core_boot:
+// Load the stack address, set the stack and frame pointers.
+  adrp    x0, __kernel_stack_start
+  mov     sp, x0
+  mov     fp, sp
+
+// Halt
+1:
+  wfi
+  b       1b
+```
+
+ARM, however, only has the `adr` instruction. It does the same thing as `ardp`, but it is limited to an offset within +/- 4 *KiB*. Assuming a page size of 4 KiB, you can just look at the linker script and see that the stack start is well beyond 4 KiB from the `.text` section.
+
+We are going to use a little indirection trick. Consider:
+
+```assembly
+.global primary_core_boot
+primary_core_boot:
+	<some magic code goes here>
+  mov     sp, r0
+  mov     fp, sp
+
+  ...
+
+kernel_stack_start_rel:
+	.word __kernel_stack_start - kernel_stack_start_rel
+```
+
+Immediately after `primary_core_boot`, we add a label, `kernel_stack_start_rel`, that is within 4 KiB of the boot code. At that label, we store the full 32-bit offset from that label to `__kernel_stack_start`. Now we can use `adr` to get the offset from the `pc` to `kernel_stack_start_rel`, the use `ldr` to load offset stored at that label, and finally add the two together to get the absolute physical address.
+
+```assembly
+.global primary_core_boot
+primary_core_boot:
+// Load the stack address, set the stack and frame pointers.
+	adr     r0, kernel_stack_start_rel
+	ldr     r1, kernel_stack_start_rel
+	add     r0, r0, r1
+  mov     sp, r0
+  mov     fp, sp
+
+// Halt
+1:
+  wfi
+  b       1b
+
+kernel_stack_start_rel:
+	.word __kernel_stack_start - kernel_stack_start_rel
+```
+
+Voila! Propeller’s [layout.s](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/arm/start/layout.s) file for ARM contains a bunch of utility functions for getting absolute physical addresses of locations in the kernel image before the MMU is enabled.
+
+## Calling Our First Rust Function
+
+Now that we have a stack, let’s call our first Rust function: the `memset` intrinsic provided by `rustc`.
+
+The intrinsic has the following signature:
+
+```rust
+fn memset( dest: usize, val: u8, len: usize )
+```
+
+Remember that both the ARM and AArch64 procedure call standards require that the first three integer arguments be placed in `r0` - `r2`. For Aarch64, the function call is:
+
+```assembly
+  adrp    x0, __bss_start
+  mov     x1, #0
+  ldr     x2, =__bss_size
+  bl      memset
+```
+
+The `adrp` instruction gets the absolute physical address of the BSS (zero-initialized) area for the `dest` argument in `x0`. The `mov` instruction specifies 0 for the `val` argument in `x1`. The `ldr` instruction gets the value of `__bss_size` for the `size` argument in `x2`. Finally, `bl` performs a branch-and-link to `memset`.
+
+At the very beginning of `_start`, we saved the ATAG/DTB blob address to `w19`, the first of the *callee*-saved registers. Our code has not touched `w19`, and we know from the procedure call standard that `memset` must restore the value of `w19` before returning.
+
+Alright! Now we are in a position where we can start creating some helper functions to set up the MMU and get it enabled.
 
 -----
 [Part 6](https://slakpi.github.io/Propeller-Kernel/part_6.html)
