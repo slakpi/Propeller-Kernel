@@ -259,11 +259,11 @@ Phew! You know what, that was a lot. Take a breath...
 
 OK, back to work.
 
-Let’s set up the stack pointer with the physical address of the stack area that we reserved in the linker script. For AArch64, this is going to be easy. For ARM, however, is a little weird at first.
+Let’s set up the stack pointer with the physical address of the stack area that we reserved in the linker script. For AArch64, this is going to be easy. For ARM, however, it is a little weird at first.
 
-We discussed PC-relative addresses in Part 3 and how the assembly code would use offsets for jumping and loading. To set up the stack pointer, however, we need the *absolute physical* address.
+We discussed PC-relative addressing in [Part 3](https://slakpi.github.io/Propeller-Kernel/part_3.html#virtual-addresses). However, to set up the stack pointer we are going to need the *absolute physical* address, not just a PC-relative offset.
 
-The AArch64 instruction `adrp` loads the absolute address from a PC-relative offset within +/- 4 GiB. For AArch64, we simply get the absolute physical address and set the pointers:
+The AArch64 instruction `adrp` calculates the absolute address from a PC-relative offset within +/- 4 GiB. That means, we can just use `adrp` to get the absolute physical address of the stack and set the pointers:
 
 ```assembly
 .global primary_core_boot
@@ -279,9 +279,9 @@ primary_core_boot:
   b       1b
 ```
 
-ARM, however, only has the `adr` instruction. It does the same thing as `ardp`, but it is limited to an offset within +/- 4 *KiB*. Assuming a page size of 4 KiB, you can just look at the linker script and see that the stack start is well beyond 4 KiB from the `.text` section.
+ARM, however, only has the `adr` instruction. It does the same thing as `ardp`, but it is limited to a 12-bit offset (+/- 4 KiB). It should be obvious from the linker script the stack start is well beyond 4 KiB from the `.text` section.
 
-We are going to use a little indirection trick. Consider:
+To get around the limitation of `adr`, we are going to use a little indirection trick. Consider:
 
 ```assembly
 .global primary_core_boot
@@ -296,7 +296,7 @@ kernel_stack_start_rel:
 	.word __kernel_stack_start - kernel_stack_start_rel
 ```
 
-Immediately after `primary_core_boot`, we add a label, `kernel_stack_start_rel`, that is within 4 KiB of the boot code. At that label, we store the full 32-bit offset from that label to `__kernel_stack_start`. Now we can use `adr` to get the offset from the `pc` to `kernel_stack_start_rel`, the use `ldr` to load offset stored at that label, and finally add the two together to get the absolute physical address.
+Immediately after the code for `primary_core_boot`, we add a label, `kernel_stack_start_rel`, that is within 4 KiB. At that label, we store the full 32-bit offset from that label to `__kernel_stack_start`. Now we can use `adr` to get the absolute physical address of `kernel_stack_start_rel`, use `ldr` to load offset stored at that label, then add the two together to get the absolute physical address of the stack.
 
 ```assembly
 .global primary_core_boot
@@ -321,7 +321,7 @@ Voila! Propeller’s [layout.s](https://github.com/slakpi/Propeller-Kernel/blob/
 
 ## Calling Our First Rust Function
 
-Now that we have a stack, let’s call our first Rust function: the `memset` intrinsic provided by `rustc`.
+Now that we have a stack, let’s call our first Rust function: the `memset` intrinsic provided by `rustc`. We will use it to zero-initialize the `.bss` section.
 
 The intrinsic has the following signature:
 
@@ -329,7 +329,7 @@ The intrinsic has the following signature:
 fn memset( dest: usize, val: u8, len: usize )
 ```
 
-Remember that both the ARM and AArch64 procedure call standards require that the first three integer arguments be placed in `r0` - `r2`. For Aarch64, the function call is:
+Remember that both the ARM and AArch64 procedure call standards require the caller to place the first three integer arguments in `r0` - `r2`. For Aarch64, the function call is:
 
 ```assembly
   adrp    x0, __bss_start
@@ -338,9 +338,9 @@ Remember that both the ARM and AArch64 procedure call standards require that the
   bl      memset
 ```
 
-The `adrp` instruction gets the absolute physical address of the BSS (zero-initialized) area for the `dest` argument in `x0`. The `mov` instruction specifies 0 for the `val` argument in `x1`. The `ldr` instruction gets the value of `__bss_size` for the `size` argument in `x2`. Finally, `bl` performs a branch-and-link to `memset`.
+The `adrp` instruction gets the absolute physical address of the `.bss` section for the `dest` argument in `x0`. The `mov` instruction specifies 0 for the `val` argument in `x1`. The `ldr` instruction gets the value of `__bss_size` for the `size` argument in `x2`. Finally, `bl` performs a branch-and-link to `memset`.
 
-At the very beginning of `_start`, we saved the ATAG/DTB blob address to `w19`, the first of the *callee*-saved registers. Our code has not touched `w19`, and we know from the procedure call standard that `memset` must restore the value of `w19` before returning.
+At the very beginning of `_start`, we saved the ATAG/DTB blob address to `w19`, the first of the *callee*-saved registers. Our code has not touched `w19`, and we know from the procedure call standard that `memset` must restore the value of `w19` before returning. So, that register will remain safe.
 
 Alright! Now we are in a position where we can start creating some helper functions to set up the MMU and get it enabled.
 
