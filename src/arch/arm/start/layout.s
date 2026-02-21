@@ -5,7 +5,7 @@
 //! only allows getting the PC-relative address of a label within +/- 1 MiB.
 //!
 //! Instead of getting the physical address of a label, we create another
-//! "relative" label that is within +/- 1 MiB of the referencing code. The
+//! "relative" label that is within +/- 4 KiB of the referencing code. The
 //! difference between the "relative" label and actual address is stored at the
 //! "relative" label. Using ADR on the "relative" label gets the physical
 //! near PC-relative address of the label, and using LDR on the "relative" label
@@ -25,6 +25,11 @@ layout_get_physical_kernel_start:
   add     r0, r0, r1
   mov     pc, lr
 
+
+kernel_start_rel:
+  .word __kernel_start - kernel_start_rel
+
+
 ///-----------------------------------------------------------------------------
 ///
 /// Get the starting physical address of the BSS area.
@@ -34,6 +39,11 @@ layout_get_physical_bss_start:
   ldr     r1, bss_start_rel
   add     r0, r0, r1
   mov     pc, lr
+
+
+bss_start_rel:
+  .word __bss_start - bss_start_rel
+
 
 ///-----------------------------------------------------------------------------
 ///
@@ -45,6 +55,11 @@ layout_get_physical_stack_list:
   add     r0, r0, r1
   mov     pc, lr
 
+
+kernel_stack_list_rel:
+  .word __kernel_stack_list - kernel_stack_list_rel
+
+
 ///-----------------------------------------------------------------------------
 ///
 /// Get the starting physical address of the exception vectors table.
@@ -54,6 +69,11 @@ layout_get_physical_exception_vectors_start:
   ldr     r1, kernel_exception_vectors_start_rel
   add     r0, r0, r1
   mov     pc, lr
+
+
+kernel_exception_vectors_start_rel:
+  .word __kernel_exception_vectors_start - kernel_exception_vectors_start_rel
+
 
 ///-----------------------------------------------------------------------------
 ///
@@ -65,6 +85,11 @@ layout_get_physical_id_pages_start:
   add     r0, r0, r1
   mov     pc, lr
 
+
+kernel_id_pages_start_rel:
+  .word __kernel_id_pages_start - kernel_id_pages_start_rel
+
+
 ///-----------------------------------------------------------------------------
 ///
 /// Get the ending physical address of the identity page tables.
@@ -74,6 +99,11 @@ layout_get_physical_id_pages_end:
   ldr     r1, kernel_id_pages_end_rel
   add     r0, r0, r1
   mov     pc, lr
+
+
+kernel_id_pages_end_rel:
+  .word __kernel_id_pages_end - kernel_id_pages_end_rel
+
 
 ///-----------------------------------------------------------------------------
 ///
@@ -85,6 +115,11 @@ layout_get_physical_pages_start:
   add     r0, r0, r1
   mov     pc, lr
 
+
+kernel_pages_start_rel:
+  .word __kernel_pages_start - kernel_pages_start_rel
+
+
 ///-----------------------------------------------------------------------------
 ///
 /// Get the ending physical address of the page tables.
@@ -94,6 +129,11 @@ layout_get_physical_pages_end:
   ldr     r1, kernel_pages_end_rel
   add     r0, r0, r1
   mov     pc, lr
+
+
+kernel_pages_end_rel:
+  .word __kernel_pages_end - kernel_pages_end_rel
+
 
 ///-----------------------------------------------------------------------------
 ///
@@ -105,24 +145,6 @@ layout_get_physical_kernel_end:
   add     r0, r0, r1
   mov     pc, lr
 
-///-----------------------------------------------------------------------------
-///
-/// Relative labels.
-kernel_start_rel:
-  .word __kernel_start - kernel_start_rel
-bss_start_rel:
-  .word __bss_start - bss_start_rel
-kernel_stack_list_rel:
-  .word __kernel_stack_list - kernel_stack_list_rel
-kernel_exception_vectors_start_rel:
-  .word __kernel_exception_vectors_start - kernel_exception_vectors_start_rel
-kernel_id_pages_start_rel:
-  .word __kernel_id_pages_start - kernel_id_pages_start_rel
-kernel_id_pages_end_rel:
-  .word __kernel_id_pages_end - kernel_id_pages_end_rel
-kernel_pages_start_rel:
-  .word __kernel_pages_start - kernel_pages_start_rel
-kernel_pages_end_rel:
-  .word __kernel_pages_end - kernel_pages_end_rel
+
 kernel_end_rel:
   .word __kernel_end - kernel_end_rel

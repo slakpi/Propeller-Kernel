@@ -132,6 +132,7 @@ primary_core_boot:
   ldr     r2, kernel_svc_stack_start_rel
   add     r1, r1, r2
   mov     sp, r1
+  mov     fp, sp
 
 // Clear the BSS. The Rust core library provides a memset compiler intrinsic.
   bl      layout_get_physical_bss_start
@@ -155,16 +156,6 @@ primary_core_boot:
   mov     r0, r10           // DTB blob address to r0
   ldr     r2, =__vmsplit
   bl      mmu_create_kernel_page_tables
-
-// Save off physical addresses needed for the kernel configuration struct.
-  bl      layout_get_physical_kernel_start
-  mov     r4, r0
-
-  bl      layout_get_physical_pages_start
-  mov     r5, r0
-
-  bl      layout_get_physical_stack_list
-  mov     r6, r0
 
 // Setup the MMU and enable it.
 //
@@ -220,12 +211,16 @@ primary_core_begin_virt_addressing:
 
   str     r10, [sp, #4 * 2]
 
-  str     r4, [sp, #4 * 3]
+  ldr     r1, =__kernel_start
+  sub     r1, r1, r2
+  str     r1, [sp, #4 * 3]
 
   ldr     r1, =__kernel_size
   str     r1, [sp, #4 * 4]
 
-  str     r5, [sp, #4 * 5]
+  ldr     r1, =__kernel_pages_start
+  sub     r1, r1, r2
+  str     r1, [sp, #4 * 5]
 
   ldr     r1, =__kernel_pages_size
   str     r1, [sp, #4 * 6]
@@ -233,7 +228,9 @@ primary_core_begin_virt_addressing:
   ldr     r1, =__vmsplit
   str     r1, [sp, #4 * 7]
 
-  str     r6, [sp, #4 * 8]
+  ldr     r1, =__kernel_stack_list
+  sub     r1, r1, r2
+  str     r1, [sp, #4 * 8]
 
   ldr     r1, =__kernel_stack_pages
   str     r1, [sp, #4 * 9]

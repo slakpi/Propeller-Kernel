@@ -229,11 +229,6 @@ primary_core_boot:
   mov     x0, x19           // DTB blob address to x0
   bl      mmu_create_kernel_page_tables
 
-// Save off physical addresses needed for the kernel configuration struct.
-  adrp    x20, __kernel_start
-  adrp    x21, __kernel_pages_start
-  adrp    x22, __kernel_stack_list
-
 // Enable the MMU.
 //
 //   NOTE: Manually set the link register to the virtual return address when
@@ -284,16 +279,22 @@ primary_core_begin_virt_addressing:
   ldr     x10, =__page_size
   stp     x9, x10, [sp, #8 * 0]
 
-  stp     x19, x20, [sp, #8 * 2]
+  ldr     x10, =__kernel_start
+  sub     x10, x10, x9
+  stp     x19, x10, [sp, #8 * 2]
 
-  ldr     x9, =__kernel_size
-  stp     x9, x21, [sp, #8 * 4]
+  ldr     x10, =__kernel_size
+  ldr     x11, =__kernel_pages_start
+  sub     x11, x11, x9
+  stp     x10, x11, [sp, #8 * 4]
 
-  ldr     x9, =__kernel_pages_size
-  stp     x9, x22, [sp, #8 * 6]
+  ldr     x10, =__kernel_pages_size
+  ldr     x11, =__kernel_stack_list
+  sub     x11, x11, x9
+  stp     x10, x11, [sp, #8 * 6]
 
-  ldr     x9, =__kernel_stack_pages
-  str     x9, [sp, #8 * 8]
+  ldr     x10, =__kernel_stack_pages
+  str     x10, [sp, #8 * 8]
 
 // Perform single-threaded kernel initialization.
   mov     x0, sp

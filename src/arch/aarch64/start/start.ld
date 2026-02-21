@@ -10,42 +10,25 @@ SECTIONS
   .text :
   {
     __kernel_start = .;
-    __text_start = .;
 
     KEEP(*(.text.boot))
     *(.text)
-
-    . = ALIGN(__page_size);
-    __text_end = .;
   }
 
   .rodata : ALIGN(__page_size)
   {
-    __rodata_start = .;
-
     *(.rodata .rodata.*)
-
-    . = ALIGN(__page_size);
-    __rodata_end = .;
   }
 
   .data : ALIGN(__page_size)
   {
-    __data_start = .;
-
     *(.data)
-
-    . = ALIGN(__page_size);
-    __data_end = .;
   }
 
   .bss : ALIGN(__page_size)
   {
     __bss_start = .;
-
     *(.bss .bss.*)
-
-    . = ALIGN(__page_size);
     __bss_end = .;
   }
 
