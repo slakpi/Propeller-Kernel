@@ -296,7 +296,7 @@ kernel_stack_start_rel:
 	.word __kernel_stack_start - kernel_stack_start_rel
 ```
 
-Immediately after the code for `primary_core_boot`, we add a label, `kernel_stack_start_rel`, that is within 4 KiB. At that label, we store the full 32-bit offset from that label to `__kernel_stack_start`. Now we can use `adr` to get the absolute physical address of `kernel_stack_start_rel`, use `ldr` to load offset stored at that label, then add the two together to get the absolute physical address of the stack.
+Immediately after the code for `primary_core_boot`, we add a label, `kernel_stack_start_rel`, that is within 4 KiB. At that label, we store the full 32-bit offset from that label to `__kernel_stack_start`. Now we can use `adr` to get the absolute physical address of `kernel_stack_start_rel`, use `ldr` to load the offset stored at that label, then add the two together to get the absolute physical address of the stack.
 
 ```assembly
 .global primary_core_boot
