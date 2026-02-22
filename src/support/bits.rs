@@ -9,9 +9,9 @@ mod tests;
 pub use crate::arch::bits::*;
 
 use core::cmp;
-
+use crate::debug_print;
 #[cfg(feature = "module_tests")]
-use crate::test::TestContext;
+use crate::test;
 
 /// The number of bits in a machine word.
 pub const WORD_BITS: usize = usize::BITS as usize;
@@ -357,6 +357,8 @@ impl<'a, const MAP_WORDS: usize> Iterator for BitmapIter<'a, MAP_WORDS> {
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests(context: &mut TestContext) {
-  tests::run_bitmap_tests(context);
+pub fn run_tests() {
+  let mut context = test::TestContext::new();
+  tests::run_bitmap_tests(&mut context);
+  debug_print!(" bits: {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

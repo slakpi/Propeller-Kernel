@@ -2,6 +2,7 @@
 
 pub use crate::arch::task::*;
 
+use crate::debug_print;
 use core::ptr;
 
 /// Re-initialization guard.
@@ -156,4 +157,6 @@ pub fn init() {
 
   // Update the current task pointer.
   Task::set_current_task(task);
+  
+  debug_print!("task init complete.\n");
 }

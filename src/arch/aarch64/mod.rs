@@ -5,14 +5,18 @@ mod mm;
 
 pub mod task;
 
+#[cfg(feature = "serial_debug_output")]
+pub use super::arm_common::debug;
 pub use super::arm_common::{cpu, sync};
 pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
+use crate::arch::memory::PageAllocator;
+use crate::debug_print;
 use crate::support::{bits, dtb, range};
 #[cfg(feature = "module_tests")]
 use crate::test;
-use core::ptr;
+use core::{ptr, slice};
 use memory::{
   BufferedPageAllocator, FlexAllocator, MappingStrategy, MemoryConfig, MemoryRange,
   MemoryRangeHandler, MemoryZone,
@@ -130,6 +134,29 @@ pub fn init(config_addr: usize) {
 
   let kconfig = unsafe { &*(config_addr as *const KernelConfig) };
 
+  unsafe {
+    KERNEL_CONFIG = *kconfig;
+  }
+
+  // Construct a buffered, linear allocator using the reserved kernel pages
+  // area. There will be no more than six bootstrap tables, so start six pages
+  // in.
+  let offset = 6 * get_page_size();
+
+  // Six pages are used leaving 10 available, so the allocator only needs one
+  // 64-bit word for its bitmap.
+  let mut allocator = BufferedPageAllocator::<1>::new(
+    kconfig.kernel_pages_start + offset,
+    kconfig.kernel_pages_start + kconfig.kernel_pages_size,
+    get_page_size(),
+  );
+
+  #[cfg(feature = "serial_debug_output")]
+  init_serial_debug_output(kconfig.virtual_base, kconfig.kernel_pages_start, &mut allocator);
+
+  debug_print!("=== Propeller (AArch64) ===\n");
+  debug_print!("Booting on core {:x}.\n", cpu::get_id());
+
   // Require 4 KiB pages.
   assert_eq!(kconfig.page_size, PAGE_SIZE);
 
@@ -144,13 +171,11 @@ pub fn init(config_addr: usize) {
   let blob_size = dtb::DtbReader::check_dtb(blob_vaddr).unwrap_or(0);
   assert_ne!(blob_size, 0);
 
-  unsafe {
-    KERNEL_CONFIG = *kconfig;
-  }
-
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
-  init_direct_map();
+  init_direct_map(&mut allocator);
+
+  debug_print!("arch init complete.\n");
 }
 
 /// Initialize symmetric multiprocessing.
@@ -164,6 +189,8 @@ pub fn init_smp(allocator: &mut impl FlexAllocator) {
   }
 
   init_isr_stacks(allocator);
+
+  debug_print!("arch SMP init complete.\n");
 }
 
 /// Get the size of a page.
@@ -304,6 +331,34 @@ fn get_kernel_config() -> &'static KernelConfig {
   unsafe { ptr::addr_of!(KERNEL_CONFIG).as_ref().unwrap() }
 }
 
+/// Initialize low-level serial debug output.
+///
+/// # Parameters
+///
+/// * `virt_base` - The virtual base address.
+/// * `pages_start` - The physical address of the first kernel page table.
+#[cfg(feature = "serial_debug_output")]
+fn init_serial_debug_output(
+  virt_base: usize,
+  pages_start: usize,
+  allocator: &mut impl PageAllocator,
+) {
+  let range = debug::get_physical_range();
+
+  mm::map_memory(
+    virt_base,
+    pages_start,
+    virt_base + range.0,
+    range.0,
+    range.1,
+    true,
+    allocator,
+    MappingStrategy::Granular,
+  );
+
+  debug::init(virt_base + range.0);
+}
+
 /// Initialize the core configuration.
 ///
 /// # Parameters
@@ -318,6 +373,11 @@ fn init_core_config(blob_vaddr: usize) {
   };
 
   assert!(dtb_cpu::get_core_config(core_config, blob_vaddr));
+
+  for core in core_config.get_cores() {
+    let s = core::str::from_utf8(&core.get_core_type()).unwrap_or("Unknown");
+    debug_print!("Core {:x}: {}\n", core.get_id(), s)
+  }
 }
 
 /// Initialize the memory layout configuration.
@@ -381,30 +441,25 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   for range in excl {
     mem_config.exclude_range(range);
   }
+
+  for range in mem_config.get_ranges() {
+    debug_print!("Memory: {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
+  }
 }
 
 /// Initialize the linear memory map.
+///
+/// # Parameters
+///
+/// * `allocator` - The allocator that will provide new table pages.
 ///
 /// # Description
 ///
 /// Linearly maps physical memory into the kernel page tables. Invalidating the
 /// TLB is not required here. We are only adding new entries at this point.
-fn init_direct_map() {
+fn init_direct_map(allocator: &mut impl PageAllocator) {
   let kconfig = get_kernel_config();
   let mem_config = get_device_tree().get_memory_config();
-
-  // Construct a buffered, linear allocator using the reserved kernel pages
-  // area. There will be no more than six bootstrap tables, so start six pages
-  // in.
-  let offset = 6 * get_page_size();
-
-  // Six pages are used leaving 10 available, so the allocator only needs one
-  // 64-bit word for its bitmap.
-  let mut allocator = BufferedPageAllocator::<1>::new(
-    kconfig.kernel_pages_start + offset,
-    kconfig.kernel_pages_start + kconfig.kernel_pages_size,
-    get_page_size(),
-  );
 
   // Linearly map each memory range using 2 MiB sections.
   for range in mem_config.get_ranges() {
@@ -414,8 +469,15 @@ fn init_direct_map() {
       range.base,
       range.size,
       false,
-      &mut allocator,
+      allocator,
       MappingStrategy::Compact,
+    );
+
+    debug_print!(
+      "Map: {:#x} - {:#x} => {:#x}\n",
+      range.base,
+      range.base + range.size - 1,
+      kconfig.virtual_base + range.base
     );
   }
 }
@@ -443,13 +505,21 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
   let stack_size = kconfig.kernel_stack_pages << page_shift;
   let step_size = (kconfig.kernel_stack_pages + 1) << page_shift;
   let stack_area_base = get_isr_stack_area_virtual_base();
+  let table = unsafe {
+    slice::from_raw_parts_mut(
+      (kconfig.virtual_base + kconfig.kernel_stack_list) as *mut usize,
+      kconfig.page_size,
+    )
+  };
+  let mut entry_index = 2;
 
-  for (index, core) in core_config.get_cores().iter().enumerate() {
-    // Skip the primary core.
-    if index == 0 {
-      continue;
-    }
+  debug_print!(
+    "Core {:x}: EL1 {:#x}\n",
+    table[0],
+    table[1],
+  );
 
+  for (index, core) in core_config.get_cores().iter().enumerate().skip(1) {
     // We must successfully allocate a stack for each core.
     let (stack_base, _) = allocator
       .contiguous_alloc(kconfig.kernel_stack_pages)
@@ -462,10 +532,8 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
     // Calculate the virtual base address for the stack and update the stack
     // list with the core ID and stack start address.
     let stack_vbase = stack_area_base + (step_size * (index - 1)) + (1 << page_shift);
-    unsafe {
-      *ptr = core.get_id();
-      *ptr.add(1) = stack_vbase + stack_size;
-    }
+    table[entry_index] = core.get_id();
+    table[entry_index + 1] = stack_vbase + stack_size;
 
     // Map the core's stack into the ISR stack area.
     mm::map_memory(
@@ -479,14 +547,19 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
       MappingStrategy::Granular,
     );
 
-    // Zero the stack.
-    unsafe {
-      ptr::write_bytes(stack_vbase as *mut u8, 0, stack_size);
-    }
+    debug_print!(
+      "Core {:x}: EL1 {:#x}\n",
+      table[entry_index],
+      table[entry_index + 1],
+    );
+
+    entry_index += 2;
   }
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests(context: &mut test::TestContext) {
-  task::run_tests(context);
+pub fn run_tests() {
+  let mut context = test::TestContext::new();
+  crate::arch::task::run_tests(&mut context);
+  debug_print!(" arch: {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

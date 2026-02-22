@@ -584,9 +584,7 @@ The ISR Stacks area virtually maps each core's ISR stack with unmapped guard pag
 
 #### Multi-Core Initialization {#aarch64-multi-core-init}
 
-Before releasing secondary cores, Propeller allocates the ISR stacks, maps them into the ISR Stack area, and fills out the kernel stack list. The primary core's stack has already been configured, so the primary core's entry in the list is just left blank.
-
-Each entry in the kernel stack list is a pair of words: the thread ID of the core at that index and the core's stack pointer. The secondary cores will search the list for their hardware ID since obtaining their index is not trivial and requires a stack.
+Before releasing secondary cores, Propeller allocates the ISR stacks, maps them into the ISR Stack area, and fills out the kernel stack list. Each entry in the kernel stack list is a pair of words: the thread ID of the core at that index and the core's stack pointer. The secondary cores will search the list for their hardware ID since obtaining their index is not trivial and requires a stack.
 
      +---------------------------+
      | Core N ISR Stack Address  |
@@ -594,18 +592,14 @@ Each entry in the kernel stack list is a pair of words: the thread ID of the cor
      | Core N Thread ID          |
      +---------------------------+ +16 * N
     ...                         ...
-     +---------------------------+ +48
-     | Core 2 ISR Stack Address  |
-     +---------------------------+ +40
-     | Core 2 Thread ID          |
      +---------------------------+ +32
      | Core 1 ISR Stack Address  |
      +---------------------------+ +24
      | Core 1 Thread ID          |
      +---------------------------+ +16
-     | / / / / / / / / / / / / / |
+     | Core 0 ISR Stack Address  |
      +---------------------------+ +8
-     | / / / / / / / / / / / / / |
+     | Core 0 Thread ID          |
      +---------------------------+  virtual base + list address
 
 While the primary core's ISR stack is physically located in the kernel image, Propeller remaps it into the ISR Stacks area with a guard page and updates the stack pointer. The stacks for the remaining cores are dynamically allocated and mapped into the ISR Stacks area once Propeller initializes the page allocators. The "step size" in the example below is the stack size plus one page.

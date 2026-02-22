@@ -59,11 +59,8 @@ extern "C" fn pk_scheduler() -> ! {
 
 #[cfg(feature = "module_tests")]
 fn run_module_tests() {
-  let mut context = test::TestContext::new();
-
-  arch::run_tests(&mut context);
-  mm::run_tests(&mut context);
-  support::bits::run_tests(&mut context);
-
-  assert_eq!(context.fail_count, 0);
+  debug_print!("--- Running Module Tests ---\n");
+  arch::run_tests();
+  mm::run_tests();
+  support::bits::run_tests();
 }

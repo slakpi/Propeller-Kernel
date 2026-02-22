@@ -452,11 +452,10 @@ mmu_setup_and_enable:
 ///         other functions.
 .global mmu_cleanup_ttbr
 mmu_cleanup_ttbr:
-// Zero out TTBR0.
   mov     r0, #0
   mov     r1, #0
   mcrr    p15, 0, r0, r1, c2
-
+  isb
   mov     pc, lr
 
 

@@ -4,8 +4,11 @@ mod page_allocator;
 
 use crate::arch;
 use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
+use crate::debug_print;
 use crate::support::bits;
 use crate::sync::{SpinLock, SpinLockGuard};
+#[cfg(feature = "module_tests")]
+use crate::test;
 use core::ptr;
 use page_allocator::BuddyPageAllocator;
 
@@ -54,6 +57,8 @@ pub fn init() {
   }
 
   init_allocators();
+
+  debug_print!("mm init complete.\n");
 }
 
 /// Get the global allocator for a memory zone.
@@ -119,6 +124,12 @@ fn init_allocators() {
       )
       .unwrap(),
     ));
+
+    debug_print!("Zone {} allocator:\n", zone.zone_index);
+    debug_print!(" Metadata @ {:#x}\n", curr_meta_base);
+    for range in &alloc_config.get_ranges()[zone.start_index..=zone.end_index] {
+      debug_print!(" Block: {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
+    }
 
     curr_meta_base += zone.meta_size;
   }
@@ -238,6 +249,8 @@ fn get_zone_index(zone: MemoryZone) -> Option<usize> {
 
 /// Run the memory management tests.
 #[cfg(feature = "module_tests")]
-pub fn run_tests(context: &mut crate::test::TestContext) {
-  page_allocator::run_tests(context);
+pub fn run_tests() {
+  let mut context = test::TestContext::new();
+  page_allocator::run_tests(&mut context);
+  debug_print!(" mm: {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

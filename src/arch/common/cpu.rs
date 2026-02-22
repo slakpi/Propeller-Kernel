@@ -35,6 +35,8 @@ pub enum CoreEnableMethod {
 }
 
 /// Logical core information.
+///
+///   TODO: The members should be private.
 pub struct Core {
   pub id: usize,
   pub core_type: [u8; CORE_TYPE_LEN],

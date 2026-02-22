@@ -1,5 +1,7 @@
 //! AArch64 Entry Point
 
+.include "abi.h"
+
 // EL3 secure configuration default. Levels lower than EL3 are not secure and
 // cannot access secure memory. EL2 uses AArch64; EL1 is controlled by HCR_EL2.
 // See D17.2.117.
@@ -245,7 +247,10 @@ primary_core_begin_virt_addressing:
   bl      mmu_setup_primary_core_stack
 
 // Clean up the MMU setup now that the identity tables are not required.
-  bl      mmu_cleanup
+  bl      mmu_cleanup_ttbr
+
+// Finish setting up stacks.
+  bl      write_primary_core_stack_entry
 
 // Setup the exception vectors.
   adr     x9, el1_vectors
@@ -312,3 +317,22 @@ primary_core_begin_virt_addressing:
 /// Boot a secondary core.
 secondary_core_boot:
   b       cpu_halt
+
+
+///-----------------------------------------------------------------------------
+///
+/// Write the primary core stack entry to the stack list.
+write_primary_core_stack_entry:
+  fn_entry
+
+// Get the stack list, store the primary core's ID.
+  bl      cpu_get_id
+  ldr     x1, =__kernel_stack_list
+  str     x0, [x1]
+
+// Store the stack start.
+  ldr     x0, =PRIMARY_STACK_START
+  str     x0, [x1, #8]
+
+  fn_exit
+  ret

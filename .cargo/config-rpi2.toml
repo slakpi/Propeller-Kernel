@@ -1,0 +1,15 @@
+# Raspberry Pi 2 Hardware Build Configuration
+#
+#   NOTE: The Cortex-A7 is 32-bit only.
+
+[target.armv7a-none-eabi]
+rustflags = [
+    "-C", "target-cpu=cortex-a7",
+    "-C", "link_arg=--section-start=.text=0xc0008000",
+]
+
+[build]
+target = ["armv7a-none-eabi"]
+
+[env]
+CFLAGS_armv7a_none_eabi = "-mcpu=cortex-a7 -march=armv7ve -fPIC"

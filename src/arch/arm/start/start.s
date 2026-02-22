@@ -285,6 +285,13 @@ secondary_core_boot:
 ///
 /// Assumes the core is in SVC mode and the SVC stack has already been set.
 setup_stacks:
+  fn_entry
+
+// Get the stack list, store the primary core's ID.
+  bl      cpu_get_id
+  ldr     r3, =__kernel_stack_list
+  str     r0, [r3]
+
 // Save off the CPSR
   mrs     r0, cpsr
 
@@ -294,23 +301,30 @@ setup_stacks:
   ldr     r2, =__page_size
   mul     r1, r1, r2
 
-// Set the ABT mode stack.
+// Store the SVC stack start.
   ldr     r2, =PRIMARY_SVC_STACK_START
-  sub     r2, r2, r1        // Skip the SVC stack.
+  str     r2, [r3, #16]
+
+// Set the ABT mode stack.
+  sub     r2, r2, r1
+  str     r2, [r3, #12]
   msr     cpsr_c, #(0b1100000 | ARM_ABT_MODE)
   mov     sp, r2
 
 // Set the IRQ mode stack.
-  msr     cpsr_c, #(0b1100000 | ARM_IRQ_MODE)
   sub     r2, r2, r1
+  str     r2, [r3, #8]
+  msr     cpsr_c, #(0b1100000 | ARM_IRQ_MODE)
   mov     sp, r2
 
 // Set the FIQ mode stack.
-  msr     cpsr_c, #(0b1100000 | ARM_FIQ_MODE)
   sub     r2, r2, r1
+  str     r2, [r3, #4]
+  msr     cpsr_c, #(0b1100000 | ARM_FIQ_MODE)
   mov     sp, r2
 
 // Reset CPSR.
   msr     cpsr, r0
 
+  fn_exit
   mov     pc, lr

@@ -346,17 +346,20 @@ mmu_setup_and_enable:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Cleanup after enabling the MMU.
+/// Cleanup the translation table registers after enabling the MMU.
 ///
 /// # Description
 ///
-/// Removes the identity page table from TTBR0.
-.global mmu_cleanup
-mmu_cleanup:
+/// Zeros out TTBR0_EL1 leaving TTBR1_EL1 with the kernel pages.
+///
+///   NOTE: This function will be called by the secondary cores before they have
+///         stacks. This function MUST not modify callee-saved registers or call
+///         other functions.
+.global mmu_cleanup_ttbr
+mmu_cleanup_ttbr:
   mov     x9, #0
   msr     ttbr0_el1, x9
   isb
-
   ret
 
 
