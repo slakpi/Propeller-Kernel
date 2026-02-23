@@ -15,16 +15,15 @@
 use crate::sync::SpinLock;
 use core::ptr;
 
-/// BCM2835 auxiliary serial device and mini-UART registers.
-const AUX_MU_IO_REG: usize = 0x1_5040;
-const AUX_MU_LSR_REG: usize = 0x1_5054;
+/// BCM2835 mini-UART registers.
+const AUX_MU_IO_REG: usize = 0x40;
+const AUX_MU_LSR_REG: usize = 0x54;
 
-/// The base physical address of the BCM2835 GPIO and auxiliary serial device
-/// registers.
-const PHYSICAL_BASE_ADDRESS: usize = 0x3f20_0000;
+/// The base physical address of the BCM2835 serial device registers.
+const PHYSICAL_BASE_ADDRESS: usize = 0x3f21_5000;
 
-/// The number of pages to map.
-const PHYSICAL_SIZE: usize = 0x16000;
+/// The size of the range to map in bytes.
+const PHYSICAL_SIZE: usize = 0x1000;
 
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
@@ -35,7 +34,7 @@ static mut VIRTUAL_BASE: usize = 0;
 /// Serial port guard.
 static mut DRIVER_LOCK: SpinLock<()> = SpinLock::new(());
 
-/// Get the physical address range covered by this driver.
+/// Get the physical base address and number of bytes to map.
 pub fn get_physical_range() -> (usize, usize) {
   (PHYSICAL_BASE_ADDRESS, PHYSICAL_SIZE)
 }
