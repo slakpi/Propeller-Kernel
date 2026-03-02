@@ -3,20 +3,19 @@
 use super::{BlockLevel, BuddyPageAllocator};
 use crate::arch;
 use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
+use crate::debug_print;
 use crate::support::bits;
-use crate::{check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail, test};
+use crate::test::{self, memory};
+use crate::{check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail};
 use core::{iter, ptr, slice};
-
-/// Test with 4 KiB pages.
-const TEST_PAGE_SIZE: usize = 4096;
-const TEST_PAGE_SHIFT: usize = 12;
 
 /// Test with 2047 pages. The non-power of 2 tests proper setup and accounting.
 const TEST_PAGE_COUNT: usize = 2047;
-const TEST_MEM_SIZE: usize = TEST_PAGE_SIZE * TEST_PAGE_COUNT;
+
+const TEST_MEM_SIZE: usize = memory::PAGE_SIZE * TEST_PAGE_COUNT;
 
 /// Make the memory buffer larger to accommodate testing offset blocks.
-const TEST_BUFFER_SIZE: usize = TEST_MEM_SIZE + (TEST_PAGE_SIZE * 256);
+const TEST_BUFFER_SIZE: usize = TEST_MEM_SIZE + (memory::PAGE_SIZE * 256);
 
 /// Each flag bit represents a pair of blocks. The number of blocks in a level
 /// is `floor( pages / block size )`. The number of bits required at each level
@@ -52,25 +51,6 @@ const TOTAL_MEM_SIZE: usize = TEST_BUFFER_SIZE + EXPECTED_METADATA_SIZE;
 /// The allocator should serve up blocks of 2^0 up to 2^10 pages.
 const EXPECTED_BLOCK_LEVELS: usize = 11;
 
-/// Alignment type.
-#[repr(align(0x400000))]
-struct _Align4MiB;
-
-/// Wrapper type to align the memory block. Aligning to 4 MiB allows the tests
-/// to control how the allocator arranges blocks without needing to know the
-/// kernel size.
-struct _MemWrapper {
-  _alignment: [_Align4MiB; 0],
-  mem: [u8; TOTAL_MEM_SIZE],
-}
-
-/// Use a statically allocated memory block within the kernel to avoid any
-/// issues with memory configuration.
-static mut TEST_MEM: _MemWrapper = _MemWrapper {
-  _alignment: [],
-  mem: [0xcc; TOTAL_MEM_SIZE],
-};
-
 /// Test memory configuration.
 ///
 ///   NOTE: This is static to save stack space.
@@ -83,6 +63,7 @@ struct AllocatorState<'a> {
 
 /// Test entry-point.
 pub fn run_tests(context: &mut test::TestContext) {
+  debug_assert!(memory::MEMORY_SIZE >= TOTAL_MEM_SIZE);
   execute_test!(context, test_size_calculation);
   execute_test!(context, test_level_construction);
   execute_test!(context, test_metadata_front_load);
@@ -163,7 +144,7 @@ fn test_level_construction(context: &mut test::TestContext) {
 ///
 ///   ...etc...
 fn test_metadata_front_load(context: &mut test::TestContext) {
-  let mut allocator = make_allocator(TEST_PAGE_SIZE);
+  let mut allocator = make_allocator(memory::PAGE_SIZE);
   let (base_addr, _) = get_addrs();
 
   verify_allocator(
@@ -268,13 +249,13 @@ fn test_available_regions(context: &mut test::TestContext) {
   let avail = &[
     MemoryRange {
       tag: MemoryZone::InvalidZone,
-      base: base_addr + TEST_PAGE_SIZE,
-      size: 511 * TEST_PAGE_SIZE,
+      base: base_addr + memory::PAGE_SIZE,
+      size: 511 * memory::PAGE_SIZE,
     },
     MemoryRange {
       tag: MemoryZone::InvalidZone,
-      base: base_addr + (1024 * TEST_PAGE_SIZE),
-      size: TEST_MEM_SIZE - (1024 * TEST_PAGE_SIZE),
+      base: base_addr + (1024 * memory::PAGE_SIZE),
+      size: TEST_MEM_SIZE - (1024 * memory::PAGE_SIZE),
     },
   ];
 
@@ -355,7 +336,7 @@ fn test_construction_errors(context: &mut test::TestContext) {
   check_none!(context, allocator);
 
   // Use a memory size that aligns done to a size less than a page.
-  let allocator = BuddyPageAllocator::new(base_addr, TEST_PAGE_SIZE - 1, meta, good_avail);
+  let allocator = BuddyPageAllocator::new(base_addr, memory::PAGE_SIZE - 1, meta, good_avail);
   check_none!(context, allocator);
 
   // Use a base address and memory size that would overflow a pointer.
@@ -390,7 +371,7 @@ fn test_allocation(context: &mut test::TestContext) {
   for level in 0..EXPECTED_BLOCK_LEVELS {
     let mut pages: [bool; TEST_PAGE_COUNT] = [false; TEST_PAGE_COUNT];
     let exp_count = 1 << level;
-    let mask = (TEST_PAGE_SIZE << level) - 1;
+    let mask = (memory::PAGE_SIZE << level) - 1;
     let mut allocator = make_allocator(0);
     let (base_addr, _) = get_addrs();
 
@@ -402,7 +383,7 @@ fn test_allocation(context: &mut test::TestContext) {
       check_eq!(context, addr & mask, 0);
       check_eq!(context, act_count, exp_count);
 
-      let start_page = (addr - base_addr) >> TEST_PAGE_SHIFT;
+      let start_page = (addr - base_addr) >> memory::PAGE_SHIFT;
       let end_page = start_page + act_count;
       for i in start_page..end_page {
         check_eq!(context, pages[i], false);
@@ -442,7 +423,7 @@ fn test_free(context: &mut test::TestContext) {
   for j in 0..TEST_PAGE_COUNT {
     allocator.free(addr, 1);
     mask += 1;
-    addr += TEST_PAGE_SIZE;
+    addr += memory::PAGE_SIZE;
 
     for i in 0..EXPECTED_BLOCK_LEVELS {
       let bit = 1 << i;
@@ -564,9 +545,7 @@ fn make_expected_levels() -> [BlockLevel; EXPECTED_BLOCK_LEVELS] {
 /// address of the metadata.
 fn get_addrs() -> (usize, usize) {
   let virt_base = arch::get_kernel_virtual_base();
-  let phys_addr =
-    unsafe { ptr::addr_of!(TEST_MEM).as_ref().unwrap().mem.as_ptr() as usize } - virt_base;
-
+  let phys_addr = memory::get_test_memory_mut().as_ptr() as usize - virt_base;
   (phys_addr, virt_base + phys_addr + TEST_BUFFER_SIZE)
 }
 
@@ -583,7 +562,7 @@ fn get_addrs() -> (usize, usize) {
 /// The block's physical address.
 fn make_block_addr(base_addr: usize, block: usize, level: usize) -> usize {
   assert!(block > 0);
-  base_addr + ((TEST_PAGE_SIZE << level) * (block - 1))
+  base_addr + ((memory::PAGE_SIZE << level) * (block - 1))
 }
 
 /// Construct a test allocator.
@@ -598,7 +577,7 @@ fn make_block_addr(base_addr: usize, block: usize, level: usize) -> usize {
 /// be offset by up to 256 pages. With a base offset of 8 pages (32 KiB), the
 /// allocator layout looks like:
 ///
-///     |------------------ TOTAL_MEM_SIZE ------------------|
+///     |------------------- MEMORY_SIZE --------------------|
 ///
 ///     |----------- TEST_BUFFER_SIZE ------------|
 ///
@@ -617,10 +596,10 @@ fn make_block_addr(base_addr: usize, block: usize, level: usize) -> usize {
 /// # Returns
 ///
 /// The new allocator.
-fn make_allocator(base_offset: usize) -> BuddyPageAllocator<'static> {
+fn make_allocator<'alloc>(base_offset: usize) -> BuddyPageAllocator<'alloc> {
   let (base_addr, meta_addr) = get_addrs();
 
-  unsafe { ptr::addr_of_mut!(TEST_MEM).as_mut().unwrap().mem.fill(0xcc) };
+  memory::reset_test_memory();
 
   let avail = &[MemoryRange {
     tag: MemoryZone::InvalidZone,
@@ -645,7 +624,7 @@ fn verify_allocator(
   allocator: &BuddyPageAllocator,
   state: &AllocatorState,
 ) {
-  let mut blocks = TEST_MEM_SIZE >> TEST_PAGE_SHIFT;
+  let mut blocks = TEST_MEM_SIZE >> memory::PAGE_SHIFT;
   let mut level_shift = 0;
 
   for (level, exp_blocks) in iter::zip(&allocator.levels, &state.levels) {
@@ -672,7 +651,7 @@ fn verify_allocator(
       check_eq!(context, ptr, *block);
       ptr = node.next;
 
-      let page_num = (*block - allocator.base) >> TEST_PAGE_SHIFT;
+      let page_num = (*block - allocator.base) >> memory::PAGE_SHIFT;
       let block_num = page_num >> level_shift;
       let block_pair = block_num >> 1;
       let block_idx = block_pair >> bits::WORD_BIT_SHIFT;

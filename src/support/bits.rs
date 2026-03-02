@@ -8,10 +8,10 @@ mod tests;
 
 pub use crate::arch::bits::*;
 
-use core::cmp;
 use crate::debug_print;
 #[cfg(feature = "module_tests")]
 use crate::test;
+use core::cmp;
 
 /// The number of bits in a machine word.
 pub const WORD_BITS: usize = usize::BITS as usize;
@@ -132,11 +132,13 @@ pub const fn least_significant_bit(n: usize) -> usize {
 /// # Returns
 ///
 /// The words XOR'd with a random, constant seed.
-pub fn xor_checksum(words: &[usize]) -> usize {
+pub const fn xor_checksum(words: &[usize]) -> usize {
   let mut sum = CHECKSUM_SEED;
+  let mut i = 0;
 
-  for w in words {
-    sum ^= w;
+  while i < words.len() {
+    sum ^= words[i];
+    i += 1;
   }
 
   sum
@@ -292,6 +294,17 @@ impl<const MAP_WORDS: usize> Bitmap<MAP_WORDS> {
     Some(index)
   }
 
+  /// Get the number of bits set in the bitmap.
+  pub fn ones(&self) -> usize {
+    let mut count = 0;
+
+    for w in 0..self.bitmap.len() {
+      count += ones(self.bitmap[w]);
+    }
+
+    count
+  }
+
   /// Helper to get the word and shift of a bit.
   ///
   /// # Assumptions
@@ -359,6 +372,7 @@ impl<'a, const MAP_WORDS: usize> Iterator for BitmapIter<'a, MAP_WORDS> {
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {
   let mut context = test::TestContext::new();
+  debug_print!(" bits:\n");
   tests::run_bitmap_tests(&mut context);
-  debug_print!(" bits: {} pass, {} fail\n", context.pass_count, context.fail_count);
+  debug_print!("  {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

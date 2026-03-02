@@ -1,5 +1,6 @@
 //! AArch64 Task Tests
 
+use crate::debug_print;
 use crate::task::Task;
 use crate::{check_eq, execute_test, test};
 use core::slice;
@@ -10,7 +11,7 @@ use core::slice;
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
-  execute_test!(context, run_local_mapping_tests);
+  execute_test!(context, test_local_mappings);
 }
 
 /// Test local mappings.
@@ -23,7 +24,7 @@ pub fn run_tests(context: &mut test::TestContext) {
 ///
 /// For AArch64, this verifies that the thread-local mapping interface simply
 /// returns linearly-mapped addresses.
-fn run_local_mapping_tests(context: &mut test::TestContext) {
+fn test_local_mappings(context: &mut test::TestContext) {
   let task = Task::get_current_task_mut();
   let virt_base = crate::arch::get_kernel_virtual_base();
 

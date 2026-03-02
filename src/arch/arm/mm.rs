@@ -825,7 +825,7 @@ fn alloc_table_and_fill(
   //       invalid.
   if !is_pointer_entry(table_level, desc, desc_high) {
     // Let an assert occur if we cannot allocate a table from linear memory.
-    let next_addr = allocator.alloc().unwrap();
+    let (next_addr, _) = allocator.alloc(1).unwrap();
 
     unsafe {
       // Zero out the table. Any entry in the table with bits 0 and 1 set to 0

@@ -2,13 +2,17 @@
 
 * [`start` Module](#arch-start-module)
 * [`arch` Module](#arch-module)
-  * [Module Interface](#arch-module-iface)
-  * [ARM](#arm-arch-impl)
-  * [AArch64](#aarch64-arch-impl)
+    * [`arch` Module Interface](#arch-module-iface)
+    * [`arch::interrupts` Module Interface](#arch-irq-module-iface)
+    * [`arch::sync` Module Interface](#arch-sync-module-iface)
+    * [`arch::debug` Module Interface](#arch-debug-module-iface)
+    * [ARM Implementation](#arm-arch-impl)
+    * [AArch64 Implementation](#aarch64-arch-impl)
 * [`mm` Module](#mm-module)
-  * [Pager](#pager)
-  * [Page Database](#page-directory)
-  * [Buddy Allocator](#buddy-allocator)
+    * [Pager](#pager)
+    * [Page Database](#page-directory)
+    * [Buddy Allocator](#buddy-allocator)
+    * [Slab Allocator](#slab-allocator)
 * [`support` Module](#support-module)
 * [`sync` Module](#sync-module)
 
@@ -22,7 +26,7 @@ The `start` module does not have a defined interface. Each architecture may impl
 
 The `arch` module is an *interface* to architecture-specific Rust code. The module automatically includes the correct architecture code and exports it as the `arch` module.
 
-### Module Interface {#arch-module-iface}
+### `arch` Module Interface {#arch-module-iface}
 
 Each architecture supported by Propeller must implement the following public interface.
 
@@ -30,9 +34,9 @@ Each architecture supported by Propeller must implement the following public int
 
 Performs single-threaded, architecture-specific kernel initialization. Typically, this will involve determining the amount of physical memory, setting up kernel page tables, setting up page allocators, etc.
 
-#### `fn init_multi_core()`
+#### `fn init_smp()`
 
-Performs multithreaded initialization. Any secondary cores will be running with interrupts disabled when this function returns. This must be called after `init()`.
+Performs multi-processor initialization. Any secondary cores will be running with interrupts disabled when this function returns. This must be called after single-threaded Architecture, Task, and Memory Management initialization is complete.
 
 #### `fn get_page_size() -> usize`
 
@@ -70,9 +74,9 @@ Retrieves the size of bits to shift an offset right to calculate a page table in
 
 Retrieves the kernel's physical base address.
 
-#### `fn get_max_physical_address() -> usize`
+#### `fn get_maximum_physical_address() -> usize`
 
-Retrieves the maximum physical address. The maximum physical address is just the bitwise negation of the kernel's base physical address. For example, with 32-bit build and a 3/1 split, the kernel starts at 0xc000_0000 and the maximum physical address is 0x3fff_ffff. With a 64-bit build and the kernel starting at 0xffff_0000_0000_0000, the maximum physical address is 0x0000_ffff_ffff_ffff.
+Retrieves the maximum physical address. The maximum physical address is just the bitwise negation of the kernel's base virtual address. For example, with 32-bit build and a 3/1 split, the kernel starts at 0xc000_0000 and the maximum physical address is 0x3fff_ffff. With a 64-bit build and the kernel starting at 0xffff_0000_0000_0000, the maximum physical address is 0x0000_ffff_ffff_ffff.
 
 #### `fn get_kernel_virtual_base() -> usize`
 
@@ -94,6 +98,18 @@ Retrieves the virtual address of the page database.
 
 Retrieves the size of the virtual area reserved for the page database in bytes.
 
+### `arch::interrupts` Module Interface {#arch-irq-module-iface}
+
+#### `fn mask_all_interrupts()`
+
+Mask all interrupts.
+
+#### `fn unmask_all_interrupts()`
+
+Unmask all interrupts.
+
+### `arch::sync` Module Interface {#arch-sync-module-iface}
+
 #### `fn spin_lock( lock_addr: usize )`
 
 Low-level spin lock on the specified address.
@@ -106,9 +122,13 @@ Attempt a low-level spin lock on the specified address.
 
 Low-level spin lock release on the specified address.
 
+### `arch::debug` Module Interface {#arch-debug-module-iface}
+
 #### `fn debug_print( args: fmt::Arguments )`
 
-Implements architecture-dependent debug output. For example, Propeller currently uses the ARM UART to send debug messages.
+Implements system-dependent debug output. For example, Propeller provides a Cargo `bcm2835_mini_uart_debug` feature that enables a BCM2835-compatible mini-UART driver for `debug_print`.
+
+`arch::init()` should perform any initialization required for `debug_print()` as early as possible.
 
 ### ARM Implementation {#arm-arch-impl}
 
@@ -183,9 +203,9 @@ Each table has three pages, one for each of the L1, L2, and L3 LPAE tables. Only
           Identity              Virtual
           Map                   Map
 
-    PE +---------------+     +---------------+ VS + PE
-       | DTB           |     | DTB           |
-    PS +---------------+     +---------------+ VS + PS
+       +---------------+     +---------------+ VS + PE
+       | / / / / / / / |     | DTB           |
+       | / / / / / / / |     +---------------+ VS + PS
        | / / / / / / / |     | / / / / / / / |
        | / / / / / / / |     | / / / / / / / |
     KE +---------------+     +---------------+ VS + KE
@@ -196,13 +216,13 @@ Each table has three pages, one for each of the L1, L2, and L3 LPAE tables. Only
        | / / / / / / / |     | / / / / / / / |   
      0 +---------------+     +---------------+ VS
 
-| Abbreviation | Description                              |
-|:-------------|:-----------------------------------------|
-| `VS`         | `__virtual_start`                        |
-| `KS`         | `__kernel_start`                         |
-| `KE`         | ⌈ `__kernel_size` ⌉~2MiB~                |
-| `PS`         | Blob pointer provided by the bootloader. |
-| `PE`         | ⌈ Blob Size ⌉~2MiB~                      |
+| Abbreviation | Description                             |
+|:-------------|:----------------------------------------|
+| `VS`         | `__virtual_start`                       |
+| `KS`         | `__kernel_start`                        |
+| `KE`         | Section-aligned `__kernel_end`          |
+| `PS`         | Blob pointer provided by the bootloader |
+| `PE`         | Section-aligned blob size               |
 
 The identity tables allow a core to find the next instruction, typically a jump to set the program counter to virtual addressing, after enabling the MMU. After making the jump to virtual addressing, Propeller sets `TTBR0` back to 0.
 
@@ -212,12 +232,10 @@ The identity tables are placed in the kernel image prior to the virtual tables t
 
 After enabling the MMU, the primary core fills out the ARM kernel configuration struct and passes it to `pk_init` entry point. All addresses in the struct are physical.
 
-    +---------------------------------+ 44
-    | Physical primary stack address  |
     +---------------------------------+ 40
     | ISR stack page count            |
     +---------------------------------+ 36
-    | ISR stack list address          |
+    | Physical ISR stack list address |
     +---------------------------------+ 32
     | Virtual memory split            |
     +---------------------------------+ 28
@@ -238,13 +256,13 @@ After enabling the MMU, the primary core fills out the ARM kernel configuration 
 
 #### CPU Initialization
 
-Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by order in which the cores appear in the DTB. The primary core is the exception; it is always assigned index 0 regardless of its thread ID.
+Propeller scans the DTB for a list of logical cores and their thread IDs. Propeller builds a core database indexed by the order in which the cores appear in the DTB. The primary core is the exception; it is always assigned index 0 regardless of its actual thread ID.
 
 `MPIDR` allows for non-contiguous, hierarchical thread IDs, so this internal index is used as a contiguous, zero-based number used for the kernel's data structures (e.g. the ISR stack table). Propeller uses the affinity value specified the DTB `reg` tag for each core, so it is imperative that this value match the affinity values provided by `MPIDR` on each core. The core database provides reverse lookup from `MPIDR` affinity value to core index.
 
-ARM builds of Propeller are limited to [16 cores](#thread-local-area), and will only add the first 16 cores it encounters in the DTB to the core database.
+ARM builds of Propeller are limited to [16 cores](#thread-local-area), and will only add the primary core and the first 15 additional cores it encounters in the DTB to the core database.
 
-After initializing the core database, Propeller initializes a statically-allocated task structure called the Bootstrap Task and provides the Bootstrap Task with a statically-allocated page table for local mappings. This Bootstrap Task represents the single-thread boot code and allows mapping the High Memory area to set up the allocator data structures before going multithreaded. Once single-threaded initialization has completed, the Bootstrap Task will be replaced by the real Init Task.
+After initializing the core database, Propeller initializes a statically-allocated task structure called the Bootstrap Task with a statically-allocated page table for local mappings. This Bootstrap Task represents the single-thread boot code and allows mapping the High Memory area to set up the allocator data structures before going multithreaded. Once single-threaded initialization has completed, the Bootstrap Task will be replaced by the real Init Task.
 
 #### Memory Initialization
 
@@ -266,9 +284,9 @@ Propeller can use a canonical 32-bit 3/1 or 2/2 split configuration:
     |                 |                   |                 |
     +-----------------+ 0x0000_0000       +-----------------+ 0x0000_0000
 
-Not all ARM CPUs support the Large Physical Address Extensions required for the 3/1 split, however Propeller requires LPAE and will not boot otherwise.
+Not all ARM CPUs support the Large Physical Address Extensions required for the 3/1 split, however Propeller performs a check for LPAE and will halt if it is not available.
 
-The split is a balance of available physical memory versus speed. The ARM supports AArch64 and should run a 64-bit build of Propeller if it has more than 2 GiB of memory. With less than 2 GiB, a 2/2 is the most performant option. When using a 3/1 split with more than 1 GiB of memory, Propeller will use the [Linux High Memory Handling][linuxhighmem] method of per-thread temporary memory mapping to access memory beyond 896 MiB in the kernel.
+The split is a balance of available physical memory versus speed. An AArch64 build  should be used when available and the system has more than 2 GiB of memory. With less than 2 GiB, a 2/2 is the most performant option if the system use case allows limiting tasks to 2 GiB of memory. When using a 3/1 split with more than 1 GiB of memory, Propeller must use the [Linux High Memory Handling][linuxhighmem] method of per-thread temporary memory mapping in the kernel to access memory beyond the lower 896 MiB. This causes a performance hit, but is necessary if the system use case requires giving tasks up to 3 GiB of memory.
 
 When using a 3/1 split configuration, Propeller creates a Linear Memory area with a fixed, linear mapping to the first 896 MiB of physical memory starting at the kernel segment's base address.
 
@@ -307,6 +325,8 @@ When using a 3/1 split configuration, Propeller creates a Linear Memory area wit
     +-----------------+ 0x0000_0000
 
 When using a 2/2 split configuration, Propeller maps the first 1,920 MiB of physical memory starting at the kernel's base address and uses the top 128 MiB in the same manner as a 3/1 split.
+
+The kernel can directly access linear-mapped memory by simply adding the base kernel virtual address to the physical address.
 
 ##### Exception Vectors and Stubs
 
@@ -377,7 +397,7 @@ The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pa
 
 The Thread Local area is reserved for mapping per-thread page tables that map upper memory beyond the linear mappings. Each kernel thread has its own Level 3-page table that is mapped when activating the thread and allows the thread to temporarily map 2 MiB of pages into the Thread Local area.
 
-Each core is assigned a 2 MiB block within the Thread Local area, Propeller limits ARM builds to 16 cores to ensure the Thread Local area is never larger than 32 MiB. When a thread has local mappings, the kernel will pin the task to that core until unmaps all of its local mappings. This ensures the thread's pointers remain valid across context switches.
+Each core is assigned a 2 MiB block within the Thread Local area, Propeller limits ARM builds to 16 cores to ensure the Thread Local area is never larger than 32 MiB. When a thread has local mappings, the kernel will pin the thread to the current core until unmaps all of its local mappings. This ensures the thread's pointers remain valid across context switches.
 
 The Thread Local area is aligned on a 2 MiB boundary
 
@@ -395,7 +415,7 @@ There is current nothing interesting going on here. Likely, Propeller will allow
 
 #### Multi-Core Initialization
 
-See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference is that each ARM core will have SVC, ABT, IRQ, and FIQ entries in the kernel stack list. Otherwise, the multi-core initialization concepts are the same.
+See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference between ARM and AArch64 is that each ARM core will have SVC, ABT, IRQ, and FIQ entries in the kernel stack list. Otherwise, the multi-core initialization concepts are the same.
 
     ...                         ...
      +---------------------------+
@@ -470,9 +490,9 @@ Each table has three pages, one for each of the L1, L2, and L3 tables. Only the 
           Identity              Virtual
           Map                   Map
 
-    PE +---------------+     +---------------+ VS + PE
-       | DTB           |     | DTB           |
-    PS +---------------+     +---------------+ VS + PS
+       +---------------+     +---------------+ VS + PE
+       | / / / / / / / |     | DTB           |
+       | / / / / / / / |     +---------------+ VS + PS
        | / / / / / / / |     | / / / / / / / |
        | / / / / / / / |     | / / / / / / / |
     KE +---------------+     +---------------+ VS + KE
@@ -483,13 +503,13 @@ Each table has three pages, one for each of the L1, L2, and L3 tables. Only the 
        | / / / / / / / |     | / / / / / / / |   
      0 +---------------+     +---------------+ VS
 
-| Abbreviation | Description                              |
-|:-------------|:-----------------------------------------|
-| `VS`         | `__virtual_start`                        |
-| `KS`         | `__kernel_start`                         |
-| `KE`         | ⌈ `__kernel_size` ⌉~2MiB~                |
-| `PS`         | Blob pointer provided by the bootloader. |
-| `PE`         | ⌈ Blob Size ⌉~2MiB~                      |
+| Abbreviation | Description                             |
+|:-------------|:----------------------------------------|
+| `VS`         | `__virtual_start`                       |
+| `KS`         | `__kernel_start`                        |
+| `KE`         | Section-aligned `__kernel_end`          |
+| `PS`         | Blob pointer provided by the bootloader |
+| `PE`         | Section-aligned blob size               |
 
 The identity tables allow a core to find the next instruction, typically a jump to set the program counter to virtual addressing, after enabling the MMU. After making the jump to virtual addressing, Propeller sets `TTBR0_EL1` back to 0.
 
@@ -499,12 +519,10 @@ The identity tables are placed in the kernel image prior to the virtual tables t
 
 After enabling the MMU, the primary core fills out the AArch64 kernel configuration struct and passes it to the `pk_init` entry point. All addresses in the struct are physical.
 
-    +---------------------------------+ 80
-    | Physical primary stack address  |
     +---------------------------------+ 72
     | ISR stack page count            |
     +---------------------------------+ 64
-    | ISR stack list address          |
+    | Physical ISR stack list address |
     +---------------------------------+ 56
     | Page table area size            |
     +---------------------------------+ 48
@@ -634,6 +652,8 @@ After the ISR stacks have been allocated and mapped, Propeller will unpark the s
 
 ### Buddy Allocator
 
+#### Overview
+
 Refer to [Buddy Allocator][buddyalloc].
 
 A buddy allocator manages an area of physical memory and allocates blocks of up to 2^10 pages. Buddy allocators coarse allocators that should be used to allocate large blocks for kernel object (slab) allocators and granular, core-local allocators. Buddy allocators are not thread-safe and they do not protect against double-frees.
@@ -664,9 +684,210 @@ During initialization, the buddy allocator embeds a linked list of free blocks f
 
 When a block is free, the allocator calculates `Random Seed ⊕ Next Pointer ⊕ Previous Pointer` and stores the result in the block's Checksum field as a sanity check.
 
+#### Zones
+
+Propeller breaks memory up into two zones: the Linear Zone and High Memory Zone. The Linear Zone contains all linear-mapped physical memory on the current node. On 32-bit platforms, the High Memory Zone contains all physical memory beyond the Linear Zone.
+
+Each zone has its own Buddy Allocator.
+
+### Slab Allocator
+
+#### The Original Slab Allocator
+
+Refer to Jeff Bonwick's [1994][bonwick94] and [2001][bonwick01] papers.
+
+The [Buddy Allocator](#buddy-allocator) is not a great way to allocate less than a page or a non-power-of-2 number of pages. Moreover, there is only one Buddy Allocator per zone, so cores must synchronize access to the zone allocators. These limitations make the Buddy Allocator a poor choice for quickly allocating and freeing a large number of small objects from multiple cores.
+
+The original Slab Allocator described in 1994 solved the problem of quickly allocating and freeing a large number of objects. The Slab Allocator for a type T uses the Buddy Allocator to allocate blocks of pages then divides those blocks up into individual objects of type T. Allocation is now a simple matter of pulling an object off of a free list.
+
+A Slab Allocator only ever allocates a single data type, thus each kernel data type has its own Slab Allocator that only needs to access the zone allocator when allocating or freeing slabs.
+
+Because the Slab Allocator is only ever used to allocate kernel objects, it assumes it is allocating from the Linear Zone.
+
+The Slab Allocator wraps each object with additional metadata:
+
+    +-------------------+ Wrapper Size (S)
+    | Object            |
+    +-------------------+
+    | Next Pointer      |
+    +-------------------+ 0
+
+The next pointer allows the Slab Allocator to chain free objects in a singly-linked list.
+
+The Slab Allocator appends slab metadata to end of each block of pages that make up a slab:
+
+    +-------------------+ Block Metadata Size (B)
+    | Available         |
+    +-------------------+
+    | Free Pointer      |
+    +-------------------+
+    | Previous Pointer  |
+    +-------------------+
+    | Next Pointer      |
+    +-------------------+
+    | Checksum          |
+    +-------------------+ 0
+
+The block metadata tracks the number of available objects on this slab, the head of the slab's free object list, the previous and next slabs managed by the allocator, and a checksum. Like the Buddy Allocator, the checksum is an XOR checksum of the metadata contents for sanity checking.
+
+Per BONWICK94, the Slab Allocator is efficient when a slab holds at least 7 objects. This means a minimum size of a slab is:
+
+	Min Size = S * 7 + B
+
+The minimum number of pages to allocate is:
+
+                --                                                 --
+    Pages = 2 ^ | log  [ ( Min Size + Page Size - 1 ) / Page Size ] |
+                |    2                                              |
+
+For example, on a 64-bit system with 8-byte pointers, 4 KiB pages, and an object type T that is 8 bytes less than 512 KiB:
+
+	S        = 524,288 B
+	B        = 40 B
+	Min Size = 3,670,056 B
+	Pages    = 1024 per slab
+
+The Buddy Allocator will not allocate more than 1024 pages, so the maximum object size serviceable by a Slab Allocator is just under 512 KiB. In practice, kernel objects allocated by the Slab Allocator will be much smaller.
+
+#### Tracking Slabs
+
+The Slab Allocator maintains three doubly-linked slab lists: Unused, In-use, and Empty. Unused slabs have all of their objects available. In-use slabs have some of their objects available. Empty slabs have no objects available.
+
+When allocating an object, the Slab Allocator uses the following algorithm:
+
+```
+Alloc:
+  If an in-use slab is available:
+    Remove an object.
+    If the slab is now empty, move it to the empty list.
+    Return the object.
+  If the unused list is not empty:
+    Move an unused slab to the in-use list.
+    Goto Alloc.
+  If no unused slabs are available:
+    Attempt to allocate a slab.
+    If successful, place the slab on the in-use list.
+    Goto Alloc.
+  Return None.
+```
+
+Because each slab is a power-of-2 in size, the Buddy Allocator guarantees the beginning of a block it allocates is aligned to the block size, and the Slab Allocator is restricted to Linear Memory, locating the slab to which an object belongs is just a matter of aligning the object's pointer down to the slab size.
+
+When freeing an object, the Slab Allocator uses the following algorithm:
+
+```
+Free:
+  Align the object address down to the slab size.
+  Add the offset to the slab metadata.
+  Verify the checksum of the slab metadata.
+  Add the object to the slab's free list.
+
+  If the slab is on the empty list:
+    Move the slab to the in-use list.
+    Return.
+  If the slab is now full:
+    Move the slab to the unused list.
+    Return.
+```
+
+In a memory pressure situation, the Slab Allocator provides the ability to free all unused slabs.
+
+#### Enhancements
+
+The Slab Allocator solves the small object problem, but does not solve the concurrency problem. It is true that the allocator accesses the zone allocator less frequently, but access to the Slab Allocator itself must also be synchronized.
+
+BONWICK01 describes another layer on top of the Slab Allocator. The enhanced allocator maintains small bundles of objects for each core in the system. Objects may be allocated from these bundles without synchronization. Propeller uses bundles of 16 objects, but BONWICK01 advocates for dynamic bundle sizing based on run-time allocation patterns.
+
+Propeller changes the terminology a little. Propeller refers to the classic Slab Allocator as a ***Slab Manager*** and the enhanced allocator as the ***Slab Allocator***.
+
+Each core has up to two bundles at any given time: the current bundle and the standby bundle. These bundles are simply stacks of addresses to objects managed by the kernel object Slab Manager.
+
+"Up to" is specified here because each core starts with zero bundles and allocates bundles as objects are allocated and freed.
+
+A ***Bundle Manager*** handles dynamic allocation of bundle objects with its own separate Slab Manager that treats bundles as any other kernel object. The Bundle Manager tracks two lists: a list of empty bundles and a list of full bundles. In a memory pressure situation, the Bundle Manager provides the ability to free all empty bundles.
+
+The Slab Allocator now looks like:
+
+	Slab Allocator
+	+-----------------------------+
+	|                             |       +--------------------------+
+	| Kernel Object Slab Manager  |<>-----| Kernel Object Slab Lists |
+	|                             |       +--------------------------+
+	+-----------------------------+
+	|                             |       +--------------------------+
+	|                             |       | Bundle Slab Manager      |
+	|                             |       | +----------------------+ |
+	|                             |       | | Bundle Slab Lists    | |
+	| Bundle Manager              |<>-----| +----------------------+ |
+	|                             |       |                          |
+	|                             |       | Empty Bundle List        |
+	|                             |       | Full Bundle List         |
+	|                             |       +--------------------------+
+	+-----------------------------+
+	|                             |
+	| Per-Core Caches             |
+	|                             |
+	|  +----------------+         |
+	|  | +----------------+       |
+	|  + | +----------------+     |
+	|  | + | +----------------+   |
+	|  + | + | Core 0 Current |   |
+	|    + | +----------------+   |
+	|      + | Core 0 Standby |   |
+	|        +----------------+   |
+	|                             |
+	+-----------------------------+
+
+The allocation algorithm for a core now looks like:
+
+```
+Alloc:
+  If the core's current bundle is not empty:
+    Pop an object address from the bundle.
+    Return the object.
+  If the core's standby bundle is full:
+    Swap the bundles.
+    Goto Alloc.
+  If the Bundle Manager has a full bundle:
+    Exchange empty standby bundle for a full bundle.
+    Swap bundles.
+    Goto Alloc.
+  Allocate a kernel object from the Slab Manager.
+  Return the object.
+```
+
+Neither of the first two conditions require synchronization. Once the system is warm, up to 32 objects can be allocated without locking any allocators. With that said, the allocator disables interrupts during allocation. While access to the core cache does not need to be synchronized *across cores*, preventing a task from being preempted or migrated to another core during allocation is necessary to ensure the core cache is updated consistently. This does not prevent tasks running on other cores from performing allocations at the same time.
+
+When the system is cold and no objects have been freed, all allocation happens directly through the kernel object Slab Manager.
+
+The free algorithm for a core now looks like:
+
+```
+Free:
+  If the core's current bundle is not full:
+    Push the object address to the bundle.
+    Return.
+  If the core's standby bundle is empty:
+    Swap bundles.
+    Goto Free.
+  If the Bundle Manager has an empty bundle:
+    Exchange full standby bundle for an empty bundle.
+    Swap bundles.
+    Goto Free.
+  Release the kernel object to the Slab Manager.
+```
+
+Again, neither of the first two conditions require synchronization. Similar to allocation, however, interrupts are disabled during a free for the same reasons stated above.
+
+The third condition is the condition that allocates new bundles. If the Bundle Manager does not have any empty bundles, it allocates one. If it cannot allocate one, the object is just released to the Slab Manager directly.
+
+When a bundle is allocated, it is initially empty and the object being freed is added to it. The allocator does not need to allocate objects to fill a bundle. Bundles are naturally filled as objects are freed.
+
 ## `support` Module
 
 ## `sync` Module
+
+
 
 [armbootproto]: https://www.kernel.org/doc/Documentation/arm/booting.rst
 [aarch64bootproto]: https://www.kernel.org/doc/Documentation/arm64/booting.txt
@@ -677,3 +898,5 @@ When a block is free, the allocator calculates `Random Seed ⊕ Next Pointer ⊕
 [linuxhighmem]: https://docs.kernel.org/mm/highmem.html
 [recursivemap]: https://os.phil-opp.com/paging-implementation/#recursive-page-tables
 [largecorecount]: https://www.tomshardware.com/pc-components/cpus/yes-you-can-have-too-many-cores-amperes-192-core-cpus-break-arm64-linux-kernel-in-two-socket-systems-company-requests-higher-core-count-support-for-mainline-linux
+[bonwick01]: https://www.usenix.org/legacy/publications/library/proceedings/usenix01/full_papers/bonwick/bonwick.pdf
+[bonwick94]: https://www.usenix.org/legacy/publications/library/proceedings/bos94/bonwick.html

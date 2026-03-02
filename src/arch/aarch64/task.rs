@@ -22,8 +22,6 @@ static mut INITIALIZED: bool = false;
 
 /// AArch64 task context.
 ///
-///   TODO: Add floating-point registers for user tasks.
-///
 ///   TODO: Implement context switching.
 pub struct TaskContext {
   x19: usize,

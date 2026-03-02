@@ -12,7 +12,7 @@ SECTIONS
     __kernel_start = .;
 
     KEEP(*(.text.boot))
-    *(.text)
+    *(.text .text.*)
   }
 
   .rodata : ALIGN(__page_size)
@@ -22,7 +22,7 @@ SECTIONS
 
   .data : ALIGN(__page_size)
   {
-    *(.data)
+    *(.data .data.*)
   }
 
   .bss : ALIGN(__page_size)

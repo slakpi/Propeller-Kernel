@@ -34,8 +34,6 @@ static mut BOOTSTRAP_LOCAL_TABLE: AlignedTable = AlignedTable([0; 1024]);
 
 /// ARM task context.
 ///
-///   TODO: Add floating-point registers for user tasks.
-///
 ///   TODO: Implement context switching.
 pub struct TaskContext {
   r4: usize,

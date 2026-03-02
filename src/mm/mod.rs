@@ -1,6 +1,7 @@
 //! Memory Management
 
 mod page_allocator;
+mod slab_allocator;
 
 use crate::arch;
 use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
@@ -251,6 +252,8 @@ fn get_zone_index(zone: MemoryZone) -> Option<usize> {
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {
   let mut context = test::TestContext::new();
+  debug_print!(" mm:\n");
   page_allocator::run_tests(&mut context);
-  debug_print!(" mm: {} pass, {} fail\n", context.pass_count, context.fail_count);
+  slab_allocator::run_tests(&mut context);
+  debug_print!("  {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

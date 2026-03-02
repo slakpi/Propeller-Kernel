@@ -29,10 +29,11 @@ fn main() {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_aarch64(cfg: &mut cc::Build) {
-  const AARCH64_START_FILES: [&'static str; 7] = [
+  const AARCH64_START_FILES: [&'static str; 8] = [
     "src/arch/aarch64/start/cpu.s",
     "src/arch/aarch64/start/dtb.s",
     "src/arch/aarch64/start/exceptions.s",
+    "src/arch/aarch64/start/interrupts.s",
     "src/arch/aarch64/start/mm.s",
     "src/arch/aarch64/start/spin_lock.s",
     "src/arch/aarch64/start/start.s",
@@ -56,11 +57,12 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
 ///
 /// * `cfg` - The start library builder.
 fn configure_for_arm(cfg: &mut cc::Build) {
-  const ARM_START_FILES: [&'static str; 9] = [
+  const ARM_START_FILES: [&'static str; 10] = [
     "src/arch/arm/start/cpu.s",
     "src/arch/arm/start/dtb.s",
     "src/arch/arm/start/exceptions.s",
     "src/arch/arm/start/extensions.s",
+    "src/arch/arm/start/interrupts.s",
     "src/arch/arm/start/layout.s",
     "src/arch/arm/start/mm.s",
     "src/arch/arm/start/spin_lock.s",

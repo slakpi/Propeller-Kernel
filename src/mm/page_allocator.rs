@@ -4,7 +4,7 @@
 mod tests;
 
 use crate::arch;
-use crate::arch::memory::{BlockAllocator, FlexAllocator, MemoryRange, PageAllocator};
+use crate::arch::memory::{MemoryRange, PageAllocator};
 use crate::support::bits;
 use crate::task::Task;
 #[cfg(feature = "module_tests")]
@@ -30,16 +30,17 @@ impl BlockNode {
   ///
   /// * `next` - The physical address of the next node.
   /// * `prev` - The physical address of the previous node.
-  ///
-  /// # Returns
-  ///
-  /// A new node.
   fn new(next: usize, prev: usize) -> Self {
     Self {
       next,
       prev,
       checksum: bits::xor_checksum(&[next, prev]),
     }
+  }
+
+  /// Update a node's checksum with the current contents.
+  fn update_checksum(&mut self) {
+    self.checksum = bits::xor_checksum(&[self.prev, self.next]);
   }
 
   /// Verify a node's checksum.
@@ -66,14 +67,16 @@ struct BlockLevel {
 ///
 ///   NOTE: The allocator is NOT thread-safe.
 ///   NOTE: The allocator does NOT protect against double-free bugs/attacks.
-pub struct BuddyPageAllocator<'memory> {
+pub struct BuddyPageAllocator<'alloc> {
   base: usize,
   size: usize,
   levels: [BlockLevel; BLOCK_LEVELS],
-  flags: &'memory mut [usize],
+  flags: &'alloc mut [usize],
+  alloc_mem: usize,
+  free_mem: usize,
 }
 
-impl<'memory> BuddyPageAllocator<'memory> {
+impl<'alloc> BuddyPageAllocator<'alloc> {
   /// Calculate the amount of memory required for the allocator's metadata.
   ///
   /// # Parameters
@@ -104,11 +107,14 @@ impl<'memory> BuddyPageAllocator<'memory> {
   /// # Returns
   ///
   /// The size of the metadata area in bytes.
-  pub fn calc_metadata_size(size: usize) -> usize {
+  pub const fn calc_metadata_size(size: usize) -> usize {
     let (mut blocks, mut offset) = Self::calc_first_level(size);
 
-    for _ in 0..BLOCK_LEVELS {
+    // Need a traditional loop for a constant function.
+    let mut i = 0;
+    while i < BLOCK_LEVELS {
       (blocks, offset) = Self::calc_next_level(blocks, offset);
+      i += 1;
     }
 
     offset << bits::WORD_SHIFT
@@ -146,7 +152,7 @@ impl<'memory> BuddyPageAllocator<'memory> {
   ///
   /// A tuple with the number of blocks at the first level and the initial
   /// offset.
-  fn calc_first_level(size: usize) -> (usize, usize) {
+  const fn calc_first_level(size: usize) -> (usize, usize) {
     (size >> arch::get_page_shift(), 0)
   }
 
@@ -161,7 +167,7 @@ impl<'memory> BuddyPageAllocator<'memory> {
   ///
   /// A tuple with the number of blocks at the next level and the next level's
   /// offset.
-  fn calc_next_level(blocks: usize, offset: usize) -> (usize, usize) {
+  const fn calc_next_level(blocks: usize, offset: usize) -> (usize, usize) {
     // One bit per block pair.
     let bits = (blocks + 1) >> 1;
 
@@ -188,7 +194,7 @@ impl<'memory> BuddyPageAllocator<'memory> {
   /// # Returns
   ///
   /// A node reference.
-  fn get_block_node(addr: usize) -> &'static BlockNode {
+  fn get_block_node(addr: usize) -> &'alloc BlockNode {
     Self::get_block_node_mut(addr)
   }
 
@@ -210,7 +216,7 @@ impl<'memory> BuddyPageAllocator<'memory> {
   /// # Returns
   ///
   /// A mutable node reference.
-  fn get_block_node_mut(addr: usize) -> &'static mut BlockNode {
+  fn get_block_node_mut(addr: usize) -> &'alloc mut BlockNode {
     let node = Self::get_block_node_unchecked_mut(addr);
     assert!(node.verify_checksum());
     node
@@ -234,12 +240,12 @@ impl<'memory> BuddyPageAllocator<'memory> {
   /// # Returns
   ///
   /// A mutable node reference assumed to be uninitialized.
-  fn get_block_node_unchecked_mut(addr: usize) -> &'static mut BlockNode {
+  fn get_block_node_unchecked_mut(addr: usize) -> &'alloc mut BlockNode {
     let page_size = arch::get_page_size();
     assert_eq!(bits::align_down(addr, page_size), addr);
 
     let page = Task::get_current_task_mut().map_page(addr);
-    unsafe { &mut *(page as *mut BlockNode) }
+    unsafe { (page as *mut BlockNode).as_mut().unwrap() }
   }
 
   /// Release a block node.
@@ -294,6 +300,7 @@ impl<'memory> BuddyPageAllocator<'memory> {
   pub fn new(base: usize, size: usize, metadata: *mut u8, avail: &[MemoryRange]) -> Option<Self> {
     let page_size = arch::get_page_size();
     let max_physical = arch::get_maximum_physical_address();
+    let mut free_mem = 0;
 
     // Sanity check the inputs so that we can calculate an initial end address.
     if base > max_physical {
@@ -335,6 +342,8 @@ impl<'memory> BuddyPageAllocator<'memory> {
       if range.base < base || range_end > end {
         return None;
       }
+
+      free_mem += range.size;
     }
 
     // Make the allocator.
@@ -347,6 +356,8 @@ impl<'memory> BuddyPageAllocator<'memory> {
       flags: unsafe {
         slice::from_raw_parts_mut(metadata as *mut usize, meta_size >> bits::WORD_SHIFT)
       },
+      alloc_mem: 0,
+      free_mem,
     };
 
     allocator.init_metadata(&avail);
@@ -385,6 +396,10 @@ impl<'memory> BuddyPageAllocator<'memory> {
 
       let block = self.split_free_block(level, min_level);
       let pages = 1 << min_level;
+      let block_size = pages << arch::get_page_shift();
+      self.free_mem -= block_size;
+      self.alloc_mem += block_size;
+
       return Some((block, pages));
     }
 
@@ -413,10 +428,12 @@ impl<'memory> BuddyPageAllocator<'memory> {
 
     let min_level = bits::floor_log2(pages);
     assert!(min_level < BLOCK_LEVELS);
-    assert_eq!(base & (pages - 1), 0);
 
     let page_shift = arch::get_page_shift();
-    let range_end = base + ((pages << page_shift) - 1);
+    let block_size = pages << page_shift;
+    assert_eq!(base & (block_size - 1), 0);
+
+    let range_end = base + block_size - 1;
     let alloc_end = self.base + (self.size - 1);
     assert!(base >= self.base && range_end <= alloc_end);
 
@@ -443,6 +460,9 @@ impl<'memory> BuddyPageAllocator<'memory> {
       self.remove_from_list(level, buddy_addr);
       base = cmp::min(base, buddy_addr);
     }
+
+    self.free_mem += block_size;
+    self.alloc_mem -= block_size;
   }
 
   /// Initializes the allocator's linked list and accounting metadata.
@@ -601,15 +621,23 @@ impl<'memory> BuddyPageAllocator<'memory> {
     // and return the block address as the new head address. Otherwise, add the
     // block to the tail of the list.
     if head_addr == 0 {
-      *block = BlockNode::new(block_addr, block_addr);
       self.levels[level].head = block_addr;
+      block.prev = block_addr;
+      block.next = block_addr;
+      block.update_checksum();
     } else {
       let head = Self::get_block_node_mut(head_addr);
       let prev = Self::get_block_node_mut(head.prev);
 
-      *block = BlockNode::new(head_addr, head.prev);
-      *head = BlockNode::new(head.next, block_addr);
-      *prev = BlockNode::new(block_addr, prev.prev);
+      block.prev = head.prev;
+      block.next = head_addr;
+      block.update_checksum();
+
+      head.prev = block_addr;
+      head.update_checksum();
+
+      prev.next = block_addr;
+      prev.update_checksum();
 
       Self::unget_block_node();
       Self::unget_block_node();
@@ -648,7 +676,7 @@ impl<'memory> BuddyPageAllocator<'memory> {
   fn remove_from_list(&mut self, level: usize, block_addr: usize) {
     let (index, bit_idx) = self.get_flag_index_and_bit(block_addr, level);
     let head_addr = self.levels[level].head;
-    let block = Self::get_block_node(block_addr);
+    let block = Self::get_block_node_mut(block_addr);
 
     // If the block points to itself, sanity check the block and list, then
     // set the head to zero. Otherwise, remove the block.
@@ -660,8 +688,15 @@ impl<'memory> BuddyPageAllocator<'memory> {
       let prev = Self::get_block_node_mut(block.prev);
       let next = Self::get_block_node_mut(block.next);
 
-      *prev = BlockNode::new(block.next, prev.prev);
-      *next = BlockNode::new(next.next, block.prev);
+      next.prev = block.prev;
+      next.update_checksum();
+
+      prev.next = block.next;
+      prev.update_checksum();
+
+      block.next = 0;
+      block.prev = 0;
+      block.checksum = 0;
 
       Self::unget_block_node();
       Self::unget_block_node();
@@ -678,35 +713,29 @@ impl<'memory> BuddyPageAllocator<'memory> {
   }
 }
 
-impl<'memory> BlockAllocator for BuddyPageAllocator<'memory> {
-  /// See `BlockAllocator::contiguous_alloc`.
-  fn contiguous_alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
+impl<'memory> PageAllocator for BuddyPageAllocator<'memory> {
+  const MAX_BLOCK_PAGES: usize = 1 << (BLOCK_LEVELS - 1);
+
+  /// See `PageAllocator::alloc`.
+  fn alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
     self.allocate(pages)
   }
 
-  /// See `BlockAllocator::contiguous_free`.
-  fn contiguous_free(&mut self, addr: usize, pages: usize) {
+  /// See `PageAllocator::free`.
+  fn free(&mut self, addr: usize, pages: usize) {
     self.free(addr, pages);
   }
-}
 
-impl<'memory> PageAllocator for BuddyPageAllocator<'memory> {
-  /// See `PageAllocator::alloc`.
-  fn alloc(&mut self) -> Option<usize> {
-    if let Some((addr, _)) = self.allocate(1) {
-      return Some(addr);
-    }
-
-    None
+  /// See `PageAllocator::get_alloc_mem`.
+  fn get_alloc_mem(&self) -> usize {
+    self.alloc_mem
   }
 
-  /// See `PageAllocator::free`.
-  fn free(&mut self, addr: usize) {
-    self.free(addr, 1);
+  /// See `PageAllocator::get_free_mem`.
+  fn get_free_mem(&self) -> usize {
+    self.free_mem
   }
 }
-
-impl<'memory> FlexAllocator for BuddyPageAllocator<'memory> {}
 
 #[cfg(feature = "module_tests")]
 pub fn run_tests(context: &mut test::TestContext) {

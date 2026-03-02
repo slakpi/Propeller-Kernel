@@ -1,5 +1,6 @@
 //! ARM Task Tests
 
+use crate::debug_print;
 use crate::task::{Task, TaskContext};
 use crate::{check_eq, execute_test, test};
 use core::slice;
@@ -10,7 +11,7 @@ use core::slice;
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
-  execute_test!(context, run_local_mapping_tests);
+  execute_test!(context, test_local_mappings);
 }
 
 /// Test local mappings.
@@ -23,7 +24,7 @@ pub fn run_tests(context: &mut test::TestContext) {
 ///
 /// For ARM, this verifies that the thread-local mapping interface maps pages
 /// into the thread's table and returns addresses in the core's mapping range.
-fn run_local_mapping_tests(context: &mut test::TestContext) {
+fn test_local_mappings(context: &mut test::TestContext) {
   let task = Task::get_current_task_mut();
   let virt_base = crate::arch::get_kernel_virtual_base();
   let page_size = crate::arch::get_page_size();

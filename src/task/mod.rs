@@ -48,10 +48,7 @@ impl Task {
 
   /// Get a mutable reference to the current task.
   pub fn get_current_task_mut<'task>() -> &'task mut Task {
-    let addr = unsafe { get_current_task_addr() };
-
-    assert_ne!(addr, 0);
-    unsafe { &mut *(addr as *mut Task) }
+    unsafe { (get_current_task_addr() as *mut Task).as_mut().unwrap() }
   }
 
   /// Set the current task.
@@ -157,6 +154,6 @@ pub fn init() {
 
   // Update the current task pointer.
   Task::set_current_task(task);
-  
+
   debug_print!("task init complete.\n");
 }

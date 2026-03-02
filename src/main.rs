@@ -24,7 +24,8 @@ use core::panic::PanicInfo;
 ///
 /// * `info` - Information about the panic.
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+  debug_print!("Kernel panic! {} {}\n", info.message(), info.location().unwrap());
   arch::cpu::halt();
 }
 

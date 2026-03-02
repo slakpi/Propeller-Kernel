@@ -8,4 +8,5 @@ pub mod cpu;
 pub mod debug;
 pub mod dtb_cpu;
 pub mod dtb_memory;
+pub mod interrupts;
 pub mod sync;

@@ -35,14 +35,14 @@ impl<T> Deref for SpinLockGuard<'_, T> {
 
   /// Obtain a reference to the protected object.
   fn deref(&self) -> &Self::Target {
-    unsafe { &*self.lock.obj.get() }
+    unsafe { self.lock.obj.get().as_ref().unwrap() }
   }
 }
 
 impl<T> DerefMut for SpinLockGuard<'_, T> {
   /// Obtain a mutable reference to the protected object.
   fn deref_mut(&mut self) -> &mut Self::Target {
-    unsafe { &mut *self.lock.obj.get() }
+    unsafe { self.lock.obj.get().as_mut().unwrap() }
   }
 }
 

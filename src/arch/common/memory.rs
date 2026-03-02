@@ -53,51 +53,46 @@ pub enum MappingStrategy {
   Granular,
 }
 
-/// Single-page allocator interface.
-pub trait PageAllocator {
-  /// Allocate a single page from linear memory.
-  ///
-  /// # Returns
-  ///
-  /// The physical address of a page in linear memory, or None if a page could
-  /// not be allocated.
-  fn alloc(&mut self) -> Option<usize>;
-
-  /// Free a single page.
-  ///
-  /// # Parameters
-  ///
-  /// * `addr` - The physical address of the page.
-  fn free(&mut self, addr: usize);
-}
-
 /// Physically-contiguous page block allocator interface.
-pub trait BlockAllocator {
+pub trait PageAllocator {
+  const MAX_BLOCK_PAGES: usize;
+
   /// Allocate a physically-contiguous block of pages from memory.
   ///
   /// # Parameters
   ///
-  /// * `pages` - The number of pages to allocate.
+  /// * `pages` - The minimum number of pages to allocate.
+  ///
+  /// # Description
+  ///
+  /// The allocated block has the following guarantees:
+  ///
+  /// * It is physically contiguous.
+  /// * The size will be the smallest power-of-2 number of pages equal to or
+  ///   larger than the requested number of pages.
+  /// * The block will be aligned to the final size.
   ///
   /// # Returns
   ///
   /// A tuple with the physical base address of the block and the actual number
   /// of pages allocated, or None if a block of the requested size could not be
   /// allocated.
-  fn contiguous_alloc(&mut self, pages: usize) -> Option<(usize, usize)>;
+  fn alloc(&mut self, pages: usize) -> Option<(usize, usize)>;
 
-  /// Free a contiguous block of page in memory.
+  /// Free a contiguous block of pages allocated by this allocator.
   ///
   /// # Parameters
   ///
   /// * `addr` - The physical base address of the block.
   /// * `pages` - The number of pages to free.
-  fn contiguous_free(&mut self, addr: usize, pages: usize);
-}
+  fn free(&mut self, addr: usize, pages: usize);
 
-/// A flexible allocator can allocate either individual pages or physically-
-/// contiguous blocks of pages.
-pub trait FlexAllocator: PageAllocator + BlockAllocator {}
+  /// Get the amount of memory currently allocated by this allocator in bytes.
+  fn get_alloc_mem(&self) -> usize;
+
+  /// Get the amount of memory currently available to this allocator in bytes.
+  fn get_free_mem(&self) -> usize;
+}
 
 /// The buffered page allocator provides pages from a pre-allocated block of
 /// memory. The buffered page allocator only allocates single pages. The
@@ -155,21 +150,40 @@ impl<const BITMAP_WORDS: usize> BufferedPageAllocator<BITMAP_WORDS> {
 }
 
 impl<const BUFFER_SIZE: usize> PageAllocator for BufferedPageAllocator<BUFFER_SIZE> {
+  const MAX_BLOCK_PAGES: usize = 1;
+
   /// See `PageAllocator::alloc`.
-  fn alloc(&mut self) -> Option<usize> {
+  fn alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
+    if pages != 1 {
+      return None;
+    }
+
     if let Some(z) = self.bitmap.first_zero() {
       self.bitmap.set_bit(z);
-      return Some(self.start_addr + (z * self.page_size));
+      return Some((self.start_addr + (z * self.page_size), 1));
     }
 
     None
   }
 
   /// See `PageAllocator::free`.
-  fn free(&mut self, addr: usize) {
+  fn free(&mut self, addr: usize, pages: usize) {
+    assert_eq!(pages, 1);
     assert!(addr >= self.start_addr && addr < self.end_addr);
     assert!(bits::is_aligned(addr, self.page_size));
     let z = addr >> self.page_shift;
     self.bitmap.clear_bit(z);
+  }
+
+  /// Get the amount of memory currently allocated by this allocator in bytes.
+  fn get_alloc_mem(&self) -> usize {
+    let pages = self.bitmap.ones();
+    pages << self.page_shift
+  }
+
+  /// Get the amount of memory currently available to this allocator in bytes.
+  fn get_free_mem(&self) -> usize {
+    let pages = self.bitmap.len() - self.bitmap.ones();
+    pages << self.page_shift
   }
 }

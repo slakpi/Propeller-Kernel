@@ -7,7 +7,7 @@ pub mod task;
 
 #[cfg(feature = "serial_debug_output")]
 pub use super::arm_common::debug;
-pub use super::arm_common::{cpu, sync};
+pub use super::arm_common::{cpu, interrupts, sync};
 pub use super::common::{device_tree, memory};
 
 use super::arm_common::{dtb_cpu, dtb_memory};
@@ -18,8 +18,7 @@ use crate::support::{bits, dtb, range};
 use crate::test;
 use core::{ptr, slice};
 use memory::{
-  BufferedPageAllocator, FlexAllocator, MappingStrategy, MemoryConfig, MemoryRange,
-  MemoryRangeHandler, MemoryZone,
+  BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone,
 };
 
 unsafe extern "C" {
@@ -132,7 +131,7 @@ pub fn init(config_addr: usize) {
 
   assert_ne!(config_addr, 0);
 
-  let kconfig = unsafe { &*(config_addr as *const KernelConfig) };
+  let kconfig = unsafe { (config_addr as *const KernelConfig).as_ref().unwrap() };
 
   unsafe {
     KERNEL_CONFIG = *kconfig;
@@ -183,7 +182,7 @@ pub fn init(config_addr: usize) {
 /// # Parameters
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
-pub fn init_smp(allocator: &mut impl FlexAllocator) {
+pub fn init_smp(allocator: &mut impl PageAllocator) {
   if get_device_tree().get_core_config().get_core_count() < 2 {
     return;
   }
@@ -498,7 +497,7 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
 /// # Assumptions
 ///
 /// Assumes multiple cores.
-fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
+fn init_isr_stacks(allocator: &mut impl PageAllocator) {
   let kconfig = get_kernel_config();
   let core_config = get_device_tree().get_core_config();
   let page_shift = get_page_shift();
@@ -513,17 +512,11 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
   };
   let mut entry_index = 2;
 
-  debug_print!(
-    "Core {:x}: EL1 {:#x}\n",
-    table[0],
-    table[1],
-  );
+  debug_print!("Core {:x}: EL1 {:#x}\n", table[0], table[1],);
 
   for (index, core) in core_config.get_cores().iter().enumerate().skip(1) {
     // We must successfully allocate a stack for each core.
-    let (stack_base, _) = allocator
-      .contiguous_alloc(kconfig.kernel_stack_pages)
-      .unwrap();
+    let (stack_base, _) = allocator.alloc(kconfig.kernel_stack_pages).unwrap();
 
     // Each stack list entry is the core ID + stack address.
     let entry_offset = (index * 2) << bits::WORD_SHIFT;
@@ -547,11 +540,7 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
       MappingStrategy::Granular,
     );
 
-    debug_print!(
-      "Core {:x}: EL1 {:#x}\n",
-      table[entry_index],
-      table[entry_index + 1],
-    );
+    debug_print!("Core {:x}: EL1 {:#x}\n", table[entry_index], table[entry_index + 1],);
 
     entry_index += 2;
   }
@@ -560,6 +549,7 @@ fn init_isr_stacks(allocator: &mut impl FlexAllocator) {
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {
   let mut context = test::TestContext::new();
+  debug_print!(" arch:\n");
   crate::arch::task::run_tests(&mut context);
-  debug_print!(" arch: {} pass, {} fail\n", context.pass_count, context.fail_count);
+  debug_print!("  {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

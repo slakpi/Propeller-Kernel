@@ -261,7 +261,7 @@ primary_core_begin_virt_addressing:
 //   +---------------------------------+ 72
 //   | ISR stack page count            |
 //   +---------------------------------+ 64
-//   | ISR stack list address          |
+//   | Physical ISR stack list address |
 //   +---------------------------------+ 56
 //   | Page table area size            |
 //   +---------------------------------+ 48

@@ -1,5 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="AArch64 (QEMU + Tests)" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="buildProfileId" value="dev" />
     <option name="command" value="run --config .cargo/config-qemu.toml --target aarch64-unknown-none-softfloat --features=&quot;bcm2835_mini_uart_debug,module_tests&quot; -- --image kernel8.img" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />

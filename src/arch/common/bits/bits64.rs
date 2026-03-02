@@ -7,6 +7,9 @@
 /// Random seed bytes for a checksum.
 pub const CHECKSUM_SEED: usize = 0x09a5_2af1_c62b_d04b;
 
+/// Poison value.
+pub const POISON: usize = 0xcccc_cccc_cccc_cccc;
+
 /// Fast 64-bit population count.
 ///
 /// # Parameters

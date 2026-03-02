@@ -1,4 +1,7 @@
+//! Bit Manipulation Tests
+
 use super::{Bitmap, WORD_BIT_SHIFT, WORD_BITS};
+use crate::debug_print;
 use crate::support::bits;
 use crate::{check_eq, check_neq, check_none, check_optional, execute_test, mark_fail, test};
 
