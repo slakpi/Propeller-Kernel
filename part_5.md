@@ -286,7 +286,7 @@ To get around the limitation of `adr`, we are going to use a little indirection 
 ```assembly
 .global primary_core_boot
 primary_core_boot:
-	<some magic code goes here>
+  <some magic code goes here>
   mov     sp, r0
   mov     fp, sp
 
@@ -302,9 +302,9 @@ Immediately after the code for `primary_core_boot`, we add a label, `kernel_stac
 .global primary_core_boot
 primary_core_boot:
 // Load the stack address, set the stack and frame pointers.
-	adr     r0, kernel_stack_start_rel
-	ldr     r1, kernel_stack_start_rel
-	add     r0, r0, r1
+  adr     r0, kernel_stack_start_rel
+  ldr     r1, kernel_stack_start_rel
+  add     r0, r0, r1
   mov     sp, r0
   mov     fp, sp
 

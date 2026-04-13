@@ -68,7 +68,7 @@ For ARM, the 32-bit virtual address space will look like:
     |                 |                   |                 |
     +-----------------+ 0x0000_0000       +-----------------+ 0x0000_0000
 
-Most 32-bit processors provide different split modes for the address space. Windows and Linux use a 3:1 split to support up to 3 GiB of physical memory. There is a performance cost to this, however, that we will discuss later.
+Most 32-bit processors provide different split modes for the address space. Windows and Linux use a 3:1 split to support up to 3 GiB of physical memory. There can be a performance cost to this, however, that we will discuss later.
 
 For AArch64, the 64-bit virtual address space will look like:
 
