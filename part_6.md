@@ -2,13 +2,13 @@
 
 ## Introduction
 
-[Virtual Memory](https://en.wikipedia.org/wiki/Virtual_memory) is a technique that provides tasks with their own private address spaces, thus partitioning tasks from each other and the kernel and abstracting memory for user tasks.
+[Virtual Memory](https://en.wikipedia.org/wiki/Virtual_memory) is a technique that provides tasks with their own private address spaces, thus partitioning tasks from each other and abstracting memory for user tasks.
 
 At a very high level, modern processors provide [Memory Management Units (MMUs)](https://en.wikipedia.org/wiki/Memory_management_unit) that serve as intermediaries between code and physical memory when enabled. While the MMU is on, all memory addresses are treated as "virtual". When an instruction attempts to read or write memory, the MMU transparently translates the address from virtual to physical using a configuration provided by the kernel. If the translation fails, the MMU raises an exception.
 
-If the kernel has its own configuration and every user tasks has its own configuration, then they are effectively partitioned from each other by the MMU.
+If the kernel and every user task have their own separate configurations, then they are effectively partitioned from each other by the MMU.
 
-Not only does this achieve partitioning, but it allows the kernel to place and move data in physical memory without user tasks needing to know the details.
+Not only does this achieve partitioning, but it allows the kernel to place data in physical memory without user tasks needing to know the details.
 
 If a user task allocates a large block of memory, for example, the kernel can allocate physical memory in what ever way is convenient and provide a configuration that makes the block appear contiguous to the user task.
 
@@ -53,25 +53,19 @@ For AArch64, a typical general purpose 64-bit virtual address space looks like:
     |                 |
     +-----------------+ 0x0000_0000_0000_0000
 
-> NOTE: Putting the kernel at the top of the address space is just a convention. It is equally valid to put the kernel at the bottom. In fact, ARM provides a 1:3 split option that would be the equivalent of the 3:1 split but with the kernel starting at 0x0 and user memory starting at 0x4000_0000.
+> NOTE: Putting the kernel at the top of the address space is just a convention. It is equally valid to put the kernel at the bottom of the address space.
 
-The "split" in the examples above is the number of most-significant bits that need to be 1 to distinguish a virtual user address from a virtual kernel address.
-
-In the 32-bit 2:2 split example, an address is a virtual kernel address if bit 31 is 1. In the 32-bit 3:1 split example, an address is a virtual kernel address if bits 31:30 are 1.
-
-In the 64-bit example, an address is a virtual kernel address if bits 63:48 are 1. An address is a virtual user address only if bits 63:48 are 0. If bits 63:48 are any other combination of 0's and 1's, the address is invalid.
+> NOTE: This is the ***general purpose*** way of doing things. Embedded systems that know their workload and memory requirements at compile time can greatly simplify the kernel by not providing dynamic memory allocation or page swapping, and using a fixed partitioning of the address space between each user task. This setup keeps the protection provided by the MMU, but operates in a deterministic way appropriate for specialized systems.
 
 Commonly, processors maintain two active configurations, one for the kernel and one for the currently running user task, and the MMU chooses the appropriate configuration based on the upper bits of the virtual address being translated.
 
-Whenever the kernel preempts a running task and activates another task, it replaces the user configuration with the new task's configuration. Thus every user task sees the same *virtual* address space, but the kernel chooses how those virtual addresses translate to *physical* addresses.
-
-> NOTE: This is the ***general purpose*** way of doing things. Embedded systems that know their workload and memory requirements at compile time can greatly simplify the kernel by not providing dynamic memory allocation and using a fixed partitioning of the address space between each user task. This setup keeps the protection provided by the MMU, but operates in a deterministic way appropriate for specialized systems.
+Whenever the kernel preempts a running task and activates another task, it replaces the user configuration with the new task's configuration. Thus, every user task sees the same *virtual* address space, but the kernel chooses how those virtual addresses translate to *physical* addresses.
 
 ## Translation Tables
 
 So, what are these "configurations"? Translation tables! A translation table maps virtual addresses to physical addresses. While a user task may see the entirety of its own address space, it can only access the addresses for which the kernel has provided translations. Accessing any other virtual address will cause an exception.
 
-> NOTE: An exception here is not necessarily a "bad" thing. It could be that the user task or the kernel is attempting to access memory it is not allowed to access. But, in the case of user task, it could be that the task is accessing memory that has been swapped out and needs to be swapped back.
+> NOTE: An exception here is not necessarily a "bad" thing. It could be that the user task or the kernel is attempting to access memory it is not allowed to access. In the case of user task, it could also be that the task is accessing memory that has been swapped out and needs to be swapped back.
 
 If a translation table had an entry for every word on a 32-bit system, the table would consume 1 GiB of memory. So, at their most granular level, tables map pages. If each entry in the table represents a 4 KiB page, the table now only consumes 1 MiB of memory.
 
@@ -81,7 +75,7 @@ Virtual addresses spaces are typically sparse, so multiple levels of translation
 
 ### ARM
 
-The two-level scheme discussed above is how 32-bit ARM processors without [Large Physical Address Extensions](https://developer.arm.com/documentation/den0013/0400/Virtualization/Large-Physical-Address-Extensions?lang=en) operate. With LPAE, ARMv7-A extends this two-level translation scheme into three levels.
+The two-level scheme discussed above is how 32-bit ARM processors without [Large Physical Address Extensions](https://developer.arm.com/documentation/den0013/0400/Virtualization/Large-Physical-Address-Extensions) operate. With LPAE, ARMv7-A extends this two-level translation scheme into three levels when using 4 KiB pages:
 
 	Level 1       ->  Level 2       -> Level 3
 	4 Entries         512 Entries      512 Entries
@@ -97,7 +91,7 @@ Another trick LPAE-enabled ARM processors use is skipping Level 1 if the address
 
 ### AArch64
 
-AArch64 uses four levels of translation to cover the much larger address space.
+AArch64 uses four levels of translation to cover the much larger address space. When using 256 TiB user and kernel segments with 4 KiB pages, the hierarchy looks like:
 
 	Level 1  ->  Level 2  ->  Level 3  ->  Level 4
 	Covers       Covers       Covers       Covers
@@ -147,9 +141,9 @@ If the Level 2 table maps to a 2 MiB section, the MMU treats bits 20:0 as an off
 
 ## Propeller's Initial Translation Tables
 
-So far, we have been relying on position independent code and relative offsets to work around the fact that our linker script is using virtual addresses, but the MMU has not been configured and enabled. At a minimum, we need to enable the MMU and configure the translation tables to map the kernel into virtual memory so that absolute addressing works.
+So far, we have been relying on position-independent code and relative offsets to work around the fact that our linker script is using virtual addresses, but the MMU has not been configured and enabled. At a minimum, we need to enable the MMU and configure the translation tables to map the kernel into virtual memory so that absolute addressing works.
 
-Once the MMU is enabled, the kernel is not going to be able to access the DeviceTree blob with a physical address, so we are going to need to map the DeviceTree into virtual memory as well.
+Once the MMU is enabled, the kernel is not going to be able to access the DeviceTree blob with a physical address, so we are going to need to map the DeviceTree into the kernel's virtual address space as well.
 
 That is the extent of what the start code can accomplish without parsing the DeviceTree to determine how much physical memory is available and where.
 
@@ -213,13 +207,13 @@ SECTIONS
 
 #### Step 1A: Is that all?
 
-Consider everything we have done up to this point. Remember the discussion about position independent code being necessary so that the Program Counter can add offsets the ***physical*** address it is using?
+Consider everything we have done up to this point. Remember the discussion about position-independent code being necessary so that the `PC` can add offsets the ***physical*** address it is using?
 
 Now consider what we are about to do. We are about to provide the MMU with translation tables for the kernel's virtual address space and then turn the MMU on.
 
-What is going to happen the moment after we turn the MMU on when the Program Counter tries to fetch the next instruction using a ***physical*** address? Well, quite simply: we are going to get an exception.
+What is going to happen the moment after we turn the MMU on when the `PC` tries to fetch the next instruction using a ***physical*** address? Well, quite simply: we are going to get an exception.
 
-We are far from having any user tasks running, so this problem is easily solved by configuring the MMU with one set of tables for the kernel's address space and a second set of identity tables that just map physical addresses back to the same physical address. After turning the MMU on, we add an instruction that performs a jump to a virtual kernel address and now the Program Counter is using addresses in the kernel's virtual address space. Voila.
+We are far from having any user tasks running, so this problem is easily solved by configuring the MMU with one set of tables for the kernel's address space and a second set of identity tables that just map physical addresses back to the same physical address. After turning the MMU on, we add an instruction that performs a jump to a virtual kernel address and now the `PC` is using addresses in the kernel's virtual address space. Voila.
 
 Let's update the kernel image to add space for these identity tables. Also, let's add some markers to let us know what the virtual start address is (`__virtual_start`), where the kernel image starts (`__kernel_start`), the size of the kernel's text, rodata, data, and BSS sections (`__kernel_size`), and where the kernel image ends (`__kernel_end`).
 
@@ -295,9 +289,9 @@ We are going to map physical memory into the kernel's virtual address space, so 
 | `PS`         | Blob pointer provided by the boot loader |
 | `PE`         | Section-aligned blob size                |
 
-> NOTE: We are section-aligning the size of the kernel and the DeviceTree. We are only going to use 2 MiB sections for the initial translation tables. So, if the kernel is 2.9 MiB, we will map 4 MiB of address space.
+> NOTE: We are section-aligning the size of the kernel and the DeviceTree, so if the kernel is 2.1 MiB, we will map 4 MiB of address space.
 
-> NOTE: There is no reason to map the DeviceTree in the identity tables. We will never access it through the physical address once the MMU is enabled.
+> NOTE: There is no reason to map the DeviceTree in the identity tables. We will never access it through the physical address again once the MMU is enabled.
 
 If all of that makes sense, one thing you may be asking is: How do we know the size of the DeviceTree. If you recall from Part 2, the boot loader provides the physical address of the start of the DeviceTree (or ATAGs), but tells us nothing about its size.
 
@@ -342,11 +336,11 @@ At a high level, the AArch64 pointer entry format that we will use in the Level 
 
 | Bit(s) | Value / Meaning                          |
 |:-------|:-----------------------------------------|
-| 63:59  | Upper attributes (zero for our purposes) |
+| 63:59  | 0b0 (upper attributes; unneeded)         |
 | 58:48  | b0                                       |
 | 47:12  | Bits 47:12 of the physical table address |
-| 11:2   | b0                                       |
-| 1:0    | b11                                      |
+| 11:2   | 0b0                                      |
+| 1:0    | 0b11 (pointer entry)                     |
 
 > NOTE: Bits 63:48 of the physical table address are ignored because of the address space split. Bits 11:0 of the address are assumed zero because the table must be page-aligned. Only bits 47:12 of the physical address are significant.
 
@@ -354,18 +348,18 @@ The 2 MiB section entry format we will use in the Level 3 table is:
 
 | Bit(s) | Value / Meaning                              |
 |:-------|:---------------------------------------------|
-| 63:50  | Upper attributes (zero for our purposes)     |
-| 49:48  | b0                                           |
+| 63:50  | 0b0 (Upper attributes; unneeded)             |
+| 49:48  | 0b0                                          |
 | 47:21  | Bits 47:21 of the section's physical address |
-| 20:17  | b0                                           |
-| 16     | b0 (not using nT)                            |
-| 15:12  | b0 (not using large physical addresses)      |
-| 11     | b0 (single privilege level)                  |
-| 10     | b1 (accessed, allow TLB to cache entry)      |
-| 9:8    | b0 (not using large physical addresses)      |
-| 7:6    | b00 (read/write) or b01 (read only)          |
-| 5:2    | b0 (memory attribute index)                  |
-| 1:0    | b01                                          |
+| 20:17  | 0b0                                          |
+| 16     | 0b0 (not using nT)                           |
+| 15:12  | 0b0 (not using large physical addresses)     |
+| 11     | 0b0 (single privilege level)                 |
+| 10     | 0b1 (accessed, allow TLB to cache entry)     |
+| 9:8    | 0b0 (not using large physical addresses)     |
+| 7:6    | 0b00 (read/write) or 0b01 (read only)        |
+| 5:2    | 0b0 (memory attribute index)                 |
+| 1:0    | 0b01 (section entry)                         |
 
 > NOTE: Like table pointers, bits 63:48 of the section's physical address are ignored. Bits 20:0 are assumed zero because the section is aligned to 2 MiB. Only bits 47:21 of the section's physical address are significant.
 
@@ -398,38 +392,38 @@ That's all for setting up the translation tables. It's a fair amount of code and
 
 [mm.s:38](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/mm.s#L38) breaks down the bits we are going to set in the Translation Control Register ([TCR_EL1](https://arm.jonpalmisc.com/latest_sysreg/AArch64-tcr_el1)).
 
-| Bit(s) | Value / Meaning                                 |
-|:-------|:------------------------------------------------|
-| 31:30  | b10 (kernel granule size - 4 KiB)               |
-| 27:26  | b0 (outer non-cacheable for kernel table walks) |
-| 25:24  | b01 (inner cacheability for kernel table walks) |
-| 21:16  | b10000 (kernel region size - 2^[64 - m])        |
-| 15:14  | b00 (user granule size - 4 KiB)                 |
-| 11:10  | b0 (outer non-cacheable for user table walks)   |
-| 9:8    | b01 (inner cacheability for user table walks)   |
-| 5:0    | b10000 (user region size - 2^[64 - n])          |
+| Bit(s) | Value / Meaning                                  |
+|:-------|:-------------------------------------------------|
+| 31:30  | 0b10 (kernel granule size - 4 KiB)               |
+| 27:26  | 0b0 (outer non-cacheable for kernel table walks) |
+| 25:24  | 0b01 (inner cacheability for kernel table walks) |
+| 21:16  | 0b10000 (kernel region size - 2^[64 - m])        |
+| 15:14  | 0b00 (user granule size - 4 KiB)                 |
+| 11:10  | 0b0 (outer non-cacheable for user table walks)   |
+| 9:8    | 0b01 (inner cacheability for user table walks)   |
+| 5:0    | 0b10000 (user region size - 2^[64 - n])          |
 
-System on Chips has a good explanation of [Inner and Outer](https://www.systemonchips.com/armv8-multi-cluster-cache-coherency-and-inner-shareable-memory-configuration/) domains. We are not concerned with multi-cluster systems, so we are just telling the MMU not to cache entries across inner sharing domains.
+System on Chips has a good explanation of ARM [Inner and Outer](https://www.systemonchips.com/armv8-multi-cluster-cache-coherency-and-inner-shareable-memory-configuration/) domains. We are not concerned with multi-cluster systems, so we are just telling the MMU not to cache entries across inner sharing domains.
 
 [mm.s:69](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/mm.s#L69) breaks down the bits we are going to set in the Memory Attribute Indirection Register ([MAIR_EL1](https://arm.jonpalmisc.com/latest_sysreg/AArch64-mair_el1)).
 
 Rather than setting the same memory attribute bits on every translation table entry, `MAIR_EL1` allows creating up to 8 different memory attribute sets that we can reference by index in the translation table entries. Right now, we only really need to configure attribute sets for normal and device memory.
 
-| Bit(s) | Value / Meaning                                 |
-|:-------|:------------------------------------------------|
-| 63:16  | b0                                              |
-| 15:8   | b0 (device memory, no caching)                  |
-| 7:0    | b11111111 (normal memory, caching)              |
+| Bit(s) | Value / Meaning                     |
+|:-------|:------------------------------------|
+| 63:16  | 0b0                                 |
+| 15:8   | 0b0 (device memory, no caching)     |
+| 7:0    | 0b11111111 (normal memory, caching) |
 
-[`mmu_setup_and_enable`](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/mm.s#L328) is responsible for setting TCR_EL1 and MAIR_EL1, setting up the translation table pointers, and enabling the MMU.
+[`mmu_setup_and_enable`](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/mm.s#L328) is responsible for setting `TCR_EL1` and `MAIR_EL1`, setting up the translation table pointers, and enabling the MMU.
 
-[TTBR1_EL1](https://arm.jonpalmisc.com/latest_sysreg/AArch64-ttbr1_el1) is the translation table pointer for the virtual address space starting at 0xffff_0000_0000_0000. This register will be set to the physical address of the kernel's translation table.
+[TTBR1_EL1](https://arm.jonpalmisc.com/latest_sysreg/AArch64-ttbr1_el1) is the translation table pointer for the virtual address space starting at 0xffff_0000_0000_0000. This register will be set to the physical address of the kernel's Level 1 translation table.
 
-[TTBR0_EL1](https://arm.jonpalmisc.com/latest_sysreg/AArch64-ttbr0_el1) is the translation table pointer for the virtual address space starting at 0x0. Typically, this will be set to the physical address of the running task's translation table. For now, we will set it to the identity table.
+[TTBR0_EL1](https://arm.jonpalmisc.com/latest_sysreg/AArch64-ttbr0_el1) is the translation table pointer for the virtual address space starting at 0x0. Typically, this will be set to the physical address of the running task's translation table. For now, we will set it to the Level 1 identity table.
 
 ### Jumping to Virtual Addressing
 
-[start.s:234](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/start.s#L234) calls `mmu_setup_and_enable` and performs the jump to virtual addressing via the Link Register.
+[start.s:234](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/start.s#L234) calls `mmu_setup_and_enable` and performs the jump to virtual addressing via the Link Register (`LR`). Normally, branch-and-link is used to automatically set the `LR` to the return address. This code sets it manually to the virtual return address.
 
 ```assembly
 // Enable the MMU.
@@ -444,11 +438,9 @@ Rather than setting the same memory attribute bits on every translation table en
 primary_core_begin_virt_addressing:
 ```
 
-The code passes the physical addresses for the Level 1 identity and kernel tables to `mmu_setup_and_enable` and manually sets the Link Register to the absolute ***virtual*** address of the `primary_core_begin_virt_addressing` label. This allows the return from `mmu_setup_and_enable` to jump the Program Counter to virtual addressing.
+After configuring and enabling the MMU, `mmu_setup_and_enable` will return by setting the `PC` to the virtual address we provided in the `LR`. And there we are. We've gone virtual!
 
-And there we are. We've gone virtual!
-
-The easy way to test this with GDB is to set a breakpoint at `primary_core_begin_vert_addressing`. If the MMU is set up correctly and enabled, GDB will break at the virtual address of the label.
+The easy way to test this with GDB is to set a breakpoint at `primary_core_begin_vert_addressing`. If the MMU is set up correctly and enabled, GDB will break at the ***virtual*** address of the label.
 
 We still have some cleanup work to do, but I think we've done enough for Part 6.
 
