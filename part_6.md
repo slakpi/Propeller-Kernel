@@ -446,3 +446,5 @@ We still have some cleanup work to do, but I think we've done enough for Part 6.
 
 -----
 [Part 7](https://slakpi.github.io/Propeller-Kernel/part_7.html)
+
+© Randy Widell

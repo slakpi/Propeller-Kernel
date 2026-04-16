@@ -175,6 +175,8 @@ Did you get it to build?
 -----
 [Part 4](https://slakpi.github.io/Propeller-Kernel/part_4.html)
 
+© Randy Widell
+
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.5/dist/mermaid.min.js"></script>
 <script>
   // Wait for the page to fully load

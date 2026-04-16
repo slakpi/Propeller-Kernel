@@ -82,3 +82,5 @@ Once you get going and feel like you might want to do an x86[_64] port as well, 
 
 -----
 [Part 2](https://slakpi.github.io/Propeller-Kernel/part_2.html)
+
+© Randy Widell

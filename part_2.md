@@ -422,3 +422,5 @@ Yeah. I told you it would be satisfying.
 
 -----
 [Part 3](https://slakpi.github.io/Propeller-Kernel/part_3.html)
+
+© Randy Widell

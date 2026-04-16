@@ -6,3 +6,6 @@
 * [Part 4 - Running & Debugging](https://slakpi.github.io/Propeller-Kernel/part_4.html)
 * [Part 5 - First Steps After Power On](https://slakpi.github.io/Propeller-Kernel/part_5.html)
 * [Part 6 - Initial Virtual Memory Setup](https://slakpi.github.io/Propeller-Kernel/part_6.html)
+
+-----
+© Randy Widell

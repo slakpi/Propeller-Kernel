@@ -346,3 +346,5 @@ Alright! Now we are in a position where we can start creating some helper functi
 
 -----
 [Part 6](https://slakpi.github.io/Propeller-Kernel/part_6.html)
+
+© Randy Widell
