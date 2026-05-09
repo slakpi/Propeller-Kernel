@@ -17,6 +17,7 @@ use crate::support::{bits, dtb, range};
 #[cfg(feature = "module_tests")]
 use crate::test;
 use core::{ptr, slice};
+use log::debug;
 use memory::{
   BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone,
 };
@@ -187,6 +188,7 @@ pub fn init_smp(allocator: &mut impl PageAllocator) {
     return;
   }
 
+  debug_print!("--- SMP Initialization ---\n");
   init_isr_stacks(allocator);
 
   debug_print!("arch SMP init complete.\n");
@@ -512,7 +514,8 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
   };
   let mut entry_index = 2;
 
-  debug_print!("Core {:x}: EL1 {:#x}\n", table[0], table[1],);
+  debug_print!("ISR Stacks:\n");
+  debug_print!(" Core {:x}: EL1 {:#x}\n", table[0], table[1],);
 
   for (index, core) in core_config.get_cores().iter().enumerate().skip(1) {
     // We must successfully allocate a stack for each core.
@@ -540,7 +543,7 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
       MappingStrategy::Granular,
     );
 
-    debug_print!("Core {:x}: EL1 {:#x}\n", table[entry_index], table[entry_index + 1],);
+    debug_print!(" Core {:x}: EL1 {:#x}\n", table[entry_index], table[entry_index + 1],);
 
     entry_index += 2;
   }

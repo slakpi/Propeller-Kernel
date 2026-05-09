@@ -256,7 +256,7 @@ mmu_create_kernel_page_tables:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Map the primary core's SVC, ABT, IRQ, and FIQ stacks.
+/// Map the primary core's SVC, IRQ, ABT, UND, and FIQ stacks.
 ///
 /// # Parameters
 ///
@@ -272,6 +272,10 @@ mmu_create_kernel_page_tables:
 ///     +---------------------------+
 ///     | / / / / / Guard / / / / / |
 ///     +---------------------------+
+///     | IRQ Stack                 |
+///     +---------------------------+
+///     | / / / / / Guard / / / / / |
+///     +---------------------------+
 ///     | ABT Stack                 |
 ///     +---------------------------+
 ///     | / / / / / Guard / / / / / |
@@ -283,7 +287,7 @@ mmu_create_kernel_page_tables:
 ///     | FIQ Stack                 |
 ///     +---------------------------+
 ///     | / / / / / Guard / / / / / |
-///     +---------------------------+ r0 - 4 * (stack pages + 1) * page size
+///     +---------------------------+ r0 - 5 * (stack pages + 1) * page size
 ///
 /// Upon return, the stack pointer will be updated to the provided start
 /// address.
@@ -299,6 +303,8 @@ mmu_create_kernel_page_tables:
 /// Assumes that the stack is initially empty on entry.
 .global mmu_setup_primary_core_stacks
 mmu_setup_primary_core_stacks:
+// r2 - Temp
+// r3 - Temp / Loop index
 // r4 - Current table address
 // r5 - Next table address
 // r6 - Physical stack base
@@ -338,7 +344,8 @@ mmu_setup_primary_core_stacks:
 // Calculate the base of the FIQ stack.
   mov     r10, r7
   add     r10, r10, r9      // Size with guard page
-  lsl     r10, r10, #2      // Four stacks
+  mov     r2, #5
+  mul     r10, r10, r2      // Five stacks
   sub     r0, r0, r10
 
 // Get the L2 entry address.
@@ -375,9 +382,9 @@ mmu_setup_primary_core_stacks:
   mov     r10, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_PAGE)
   orr     r6, r6, r10
 
-// Outer loop for the four stacks.
+// Outer loop for the five stacks.
   mov     r2, #0            // Zero each entry's high word
-  mov     r3, #4
+  mov     r3, #5
 
 2:
 // Inner loop over the stack pages.

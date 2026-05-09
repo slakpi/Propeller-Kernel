@@ -11,7 +11,9 @@
 .equ ARM_SVC_MODE,             0b10011
 .equ ARM_ABT_MODE,             0b10111
 .equ ARM_HYP_MODE,             0b11010
+.equ ARM_UND_MODE,             0b11011
 .equ ARM_MODE_MASK,            0b11111
+.equ MASK_FIQ_AND_IRQ,         (0b110 << 5)
 .equ SPSR_MASK_ALL_INTERRUPTS, (7 << 6)
 .equ SPSR_HYP_DEFAULT,         (SPSR_MASK_ALL_INTERRUPTS | ARM_SVC_MODE)
 
@@ -281,9 +283,20 @@ secondary_core_boot:
 ///
 /// Set up the kernel exception stacks using virtual addressing.
 ///
+/// # Description
+///
+/// Writes the primary core's stack pointers to the stack list and updates the
+/// stack pointer for each mode.
+///
+///   NOTE: See B9.3.12. Writing to CPSR_c enables writing to bits [7:0]. This
+///         includes the masks for IRQ (7), FIQ (6), and Thumb execution (5).
+///         The core mode bits [4:0] are combined with 0b11000000 to ensure
+///         IRQ and FIQ remain masked and Thumb is not used.
+///
 /// # Assumptions
 ///
-/// Assumes the core is in SVC mode and the SVC stack has already been set.
+/// Assumes the core is in SVC mode and the SVC stack has already been set to
+/// its virtual address.
 setup_stacks:
   fn_entry
 
@@ -303,24 +316,30 @@ setup_stacks:
 
 // Store the SVC stack start.
   ldr     r2, =PRIMARY_SVC_STACK_START
+  str     r2, [r3, #20]
+
+// Set the IRQ mode stack.
+  sub     r2, r2, r1
   str     r2, [r3, #16]
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_IRQ_MODE)
+  mov     sp, r2
 
 // Set the ABT mode stack.
   sub     r2, r2, r1
   str     r2, [r3, #12]
-  msr     cpsr_c, #(0b1100000 | ARM_ABT_MODE)
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_ABT_MODE)
   mov     sp, r2
 
-// Set the IRQ mode stack.
+// Set the UND mode stack.
   sub     r2, r2, r1
   str     r2, [r3, #8]
-  msr     cpsr_c, #(0b1100000 | ARM_IRQ_MODE)
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_UND_MODE)
   mov     sp, r2
 
 // Set the FIQ mode stack.
   sub     r2, r2, r1
   str     r2, [r3, #4]
-  msr     cpsr_c, #(0b1100000 | ARM_FIQ_MODE)
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_FIQ_MODE)
   mov     sp, r2
 
 // Reset CPSR.

@@ -241,6 +241,7 @@ pub fn init_smp(allocator: &mut impl PageAllocator) {
     return;
   }
 
+  debug_print!("--- SMP Initialization ---\n");
   init_isr_stacks(allocator);
 
   debug_print!("arch SMP init complete.\n");
@@ -621,13 +622,15 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
   };
   let mut entry_index = 5;
 
+  debug_print!("ISR Stacks:\n");
   debug_print!(
-    "Core {:x}: FIQ {:#x}, IRQ {:#x}, ABT {:#x}, SVC {:#x}\n",
+    " Core {:x}: FIQ {:#x}, UND {:#x}, ABT {:#x}, IRQ {:#x}, SVC {:#x}\n",
     table[0],
     table[1],
     table[2],
     table[3],
     table[4],
+    table[5],
   );
 
   for (index, core) in core_config.get_cores().iter().enumerate().skip(1) {
@@ -636,8 +639,8 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
     // Calculate the virtual base address for the stacks.
     let mut stack_vbase = stack_area_base + (step_size * 4 * (index - 1)) + (1 << page_shift);
 
-    for s in 1..=4 {
-      // We must successfully allocate a stack for each core.
+    for s in 1..=5 {
+      // We must successfully allocate stacks for each core.
       let (stack_base, _) = allocator.alloc(kconfig.kernel_stack_pages).unwrap();
 
       table[entry_index + s] = stack_vbase + stack_size;
@@ -658,15 +661,16 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
     }
 
     debug_print!(
-      "Core {:x}: FIQ {:#x}, IRQ {:#x}, ABT {:#x}, SVC {:#x}\n",
+      " Core {:x}: FIQ {:#x}, UND {:#x}, ABT {:#x}, IRQ {:#x}, SVC {:#x}\n",
       table[entry_index],
       table[entry_index + 1],
       table[entry_index + 2],
       table[entry_index + 3],
       table[entry_index + 4],
+      table[entry_index + 5],
     );
 
-    entry_index += 5;
+    entry_index += 6;
   }
 }
 

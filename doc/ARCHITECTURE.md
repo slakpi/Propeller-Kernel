@@ -148,9 +148,11 @@ Implements system-dependent debug output. For example, Propeller provides a Carg
     | .bss                 |
     +----------------------+ __kernel_svc_stack_end
     |                      |
-    |                      | __kernel_abt_stack_end
+    |                      | __kernel_irq_stack_end
     |                      |
-    | .data.stacks         | __kernel_irq_stack_end
+    |                      | __kernel_abt_stack_end
+    | .data.stacks         |
+    |                      | __kernel_und_stack_end
     |                      |
     |                      | __kernel_fiq_stack_end
     |                      |
@@ -168,13 +170,13 @@ Implements system-dependent debug output. For example, Propeller provides a Carg
 
 The base of the `.text` segment is specified by the compile-time constant `__kernel_start` provided by the build system.
 
-`.data.stacks` is the primary core's interrupt service routine (ISR) stack. Refer to `SP_irq` and `SP_svc`. 
+`.data.stacks` is an area reserved for `SP_svc`, `SP_irq`, `SP_abt`, `SP_und`, and `SP_fiq`. Section 3.1 of the ARMv7 Programmer's Guide implies SVC and IRQ share the same stack, but Section B1.3.2 of the ARMv7 Reference Manual correctly shows that `SP_svc` and `SP_irq` are separate stacks.
 
-`.data.stacks` is an area reserved for `SP_svc`, `SP_abt`, `SP_irq`, and `SP_fiq`. `__kernel_stack_pages` is a compile-time constant provided by the linker script that specifies the size of the stacks in pages. During the single-threaded setup phase, the primary core uses `SP_svc` as its general purpose stack.
+The  `__kernel_stack_pages` is a compile-time constant provided by the linker script that specifies the size of the stacks in pages. During the single-threaded setup phase, the primary core uses `SP_svc` as its general purpose stack.
 
 `.data.stack_pointers` is the ISR stack pointer table for secondary cores. During the single-threaded setup phase, the primary core will allocate pages for secondary core ISR stacks and place pointers to the tops of those stacks in this table. The secondary cores will index this table to locate their stacks when they are released.
 
-The stack pointer table is a single page of 1024 4-byte pointer entries. 1024 entries is sufficient for the 256 core maximum on ARM nodes. See [Multi-Core Initialization](#arm-multi-core-init).
+The stack pointer table is a single page of 1024 4-byte pointer entries. 1024 entries is sufficient for the 16-core maximum on ARM nodes. See [Multi-Core Initialization](#arm-multi-core-init).
 
 `.text.vectors` and `.text.stubs` are the exception vectors and stubs. The kernel maps these to the high vector addresses, 0xffff_0000 and 0xffff_1000 respectively.
 
@@ -391,7 +393,7 @@ We are not worrying about NUMA architectures, just UMA. So, a model similar to t
 
 ##### ISR Stacks
 
-The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 4 stacks per core (SVC, ABT, IRQ, FIQ), a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 768 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
+The ISR Stacks area virtually maps each core's ISR stacks with unmapped guard pages in between each to trap stack overflows. With the maximum of 16 cores, 5 stacks per core (SVC, IRQ, ABT, UND, FIQ), a page size of 4 KiB, and the default 2-page stack, the maximum ISR Stacks area size is 960 KiB with guard pages. The actual size is determined at boot when the number of cores, stack size, and page size are known.
 
 ##### Thread Local Area
 
@@ -415,20 +417,22 @@ There is current nothing interesting going on here. Likely, Propeller will allow
 
 #### Multi-Core Initialization
 
-See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference between ARM and AArch64 is that each ARM core will have SVC, ABT, IRQ, and FIQ entries in the kernel stack list. Otherwise, the multi-core initialization concepts are the same.
+See AArch64 [Multi-Core Initialization](#aarch64-multi-core-init). The primary difference between ARM and AArch64 is that each ARM core will have SVC, IRQ, ABT, UND, and FIQ entries in the kernel stack list. Otherwise, the multi-core initialization concepts are the same.
 
     ...                         ...
      +---------------------------+
      | Core X SVC Stack Address  |
+     +---------------------------+ +20
+     | Core X IRQ Stack Address  |
      +---------------------------+ +16
      | Core X ABT Stack Address  |
      +---------------------------+ +12
-     | Core X IRQ Stack Address  |
+     | Core X UND Stack Address  |
      +---------------------------+ +8
      | Core X FIQ Stack Address  |
      +---------------------------+ +4
      | Core X Thread ID          |
-     +---------------------------+ virtual base + list address + 20 * X
+     +---------------------------+ virtual base + list address + 24 * X
     ...                         ...
 
 ### AArch64 Implementation {#aarch64-arch-impl}
@@ -463,7 +467,7 @@ The base of the `.text` segment is specified by the compile-time constant `__ker
 
 `.data.stack_pointers` is the ISR stack pointer table for secondary cores. During the single-threaded setup phase, the primary core will allocate pages for secondary core ISR stacks and place pointers to the tops of those stacks in this table. The secondary cores will index this table to locate their stacks when they are released.
 
-The stack pointer table is a single page of 512 8-byte pointer entries. 512 entries is sufficient for the 256 core maximum on AArch64 nodes. See [Multi-Core Initialization](#aarch64-multi-core-init).
+The stack pointer table is a single page of 512 8-byte pointer entries. 512 entries is sufficient for the 256-core maximum on AArch64 nodes. See [Multi-Core Initialization](#aarch64-multi-core-init).
 
 `.data.id_pages` and `.data.pages` are blocks reserved for the [initial kernel page tables](#aarch64-initial-page-tables). The kernel image reserves three pages for each table.
 
@@ -561,7 +565,7 @@ Propeller uses the canonical 256 TiB arrangement for a 64-bit address space and 
     | ISR Stacks      |                           |    R G
     |.................|                           |    N M
     |                 |                           |    E E
-    | Fixed Mappings  |                           |    L N
+    | Linear Mappings |                           |    L N
     |                 |                           |      T
     +-----------------+ 0xffff_0000_0000_0000    -+
     | / / / / / / / / |

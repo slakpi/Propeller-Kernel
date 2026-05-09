@@ -70,7 +70,7 @@
 // Skip the stack pointer.
   ldr     r14, [sp, #4 * 14]
   ldr     r15, [sp, #4 * 15]
-  add	    sp, sp, #EXCEPTION_FRAME_SIZE
+  add     sp, sp, #EXCEPTION_FRAME_SIZE
 .endm
 
 
