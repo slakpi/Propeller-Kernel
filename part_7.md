@@ -183,6 +183,11 @@ primary_core_begin_virt_addressing:
   ldr     r0, =PRIMARY_SVC_STACK_START
   ldr     r1, =__vmsplit
   bl      mmu_setup_primary_core_stacks
+
+// Halt
+1:
+  wfi
+  b       1b
 ```
 
 ### AArch64
