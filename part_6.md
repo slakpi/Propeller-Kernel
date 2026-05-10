@@ -436,6 +436,11 @@ Rather than setting the same memory attribute bits on every translation table en
   b       mmu_setup_and_enable
 
 primary_core_begin_virt_addressing:
+
+// Halt
+1:
+  wfi
+  b       1b
 ```
 
 After configuring and enabling the MMU, `mmu_setup_and_enable` will return by setting the `PC` to the virtual address we provided in the `LR`. And there we are. We've gone virtual!
