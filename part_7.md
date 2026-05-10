@@ -128,7 +128,39 @@ Mapping the stacks is just a matter of creating a new translation table and doin
 
 [`mmu_setup_primary_core_stacks`](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/arm/start/mm.s#L305) looks pretty complicated, but that is just the nature of assembly. All it really does is map a free Level 3 table, finds the base of the FIQ stack, then performs a loop to add entries for the five ARM stacks taking care to skip the guard pages.
 
+When it is done, the stacks will be mapped in this order:
+
+    +---------------------------+ 0xfe40_0000
+    | SVC Stack                 |
+    +---------------------------+
+    | / / / / / Guard / / / / / |
+    +---------------------------+
+    | IRQ Stack                 |
+    +---------------------------+
+    | / / / / / Guard / / / / / |
+    +---------------------------+
+    | ABT Stack                 |
+    +---------------------------+
+    | / / / / / Guard / / / / / |
+    +---------------------------+
+    | IRQ Stack                 |
+    +---------------------------+
+    | / / / / / Guard / / / / / |
+    +---------------------------+
+    | FIQ Stack                 |
+    +---------------------------+
+    | / / / / / Guard / / / / / |
+    +---------------------------+ 0xfe3f_1000
+
 [`mmu_setup_primary_core_stack`](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/mm.s#L214) does the same thing for AArch64, but only needs to add entries for the single stack.
+
+When it is done, the EL1 stack will be mapped as:
+
+    +---------------------------+ 0xffff_fe00_0000_0000
+    | SVC Stack                 |
+    +---------------------------+
+    | / / / / / Guard / / / / / |
+    +---------------------------+ 0xffff_fdff_ffff_d000
 
 Both functions do something a little sneaky, however. Recall that a function prologue saves the current stack pointer to the frame pointer register and a function epilogue restores the stack pointer. Both functions save the *virtual* SVC / EL1 stack pointer to frame pointer and restore that value at the end of the function.
 
