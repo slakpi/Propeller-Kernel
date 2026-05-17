@@ -146,15 +146,15 @@ Implements system-dependent debug output. For example, Propeller provides a Carg
     | .data                |
     +----------------------+ __bss_start
     | .bss                 |
-    +----------------------+ __kernel_svc_stack_end
+    +----------------------+ FIQ stack base
     |                      |
-    |                      | __kernel_irq_stack_end
+    |                      | UND stack base
     |                      |
-    |                      | __kernel_abt_stack_end
+    |                      | ABT stack base
     | .data.stacks         |
-    |                      | __kernel_und_stack_end
+    |                      | IRQ stack base
     |                      |
-    |                      | __kernel_fiq_stack_end
+    |                      | SVC stack base
     |                      |
     +----------------------+ __kernel_stack_list
     | .data.stack_pointers |
