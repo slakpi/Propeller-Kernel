@@ -17,7 +17,6 @@ use crate::support::{bits, dtb, range};
 #[cfg(feature = "module_tests")]
 use crate::test;
 use core::{ptr, slice};
-use log::debug;
 use memory::{
   BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone,
 };
