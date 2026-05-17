@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="ARMv7a (Rpi2)" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="buildProfileId" value="dev" />
-    <option name="command" value="run --config .cargo/config-rpi2.toml --target armv7a-none-eabi --features=&quot;bcm2835_mini_uart_debug&quot; -- --image kernel7.img" />
+    <option name="command" value="run --config .cargo/config-rpi2.toml --target armv7a-none-eabi -- --image kernel7.img" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />
     <option name="emulateTerminal" value="true" />
