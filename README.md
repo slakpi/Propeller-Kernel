@@ -102,11 +102,11 @@ Runs module verification tests at boot. These include verification tests for tas
 
 #### `bcm2835_mini_uart_debug`
 
-Enables a low-level mini-UART serial output driver for BCM2835-compatible platforms very early in the boot process. This driver assumes the mini-UART has been configured by the boot loader. On a Raspberry Pi 3+, this is done by including `enable_uart=1` in config.txt`. When debugging with QEMU, use `-serial null -serial stdio` to redirect the mini-UART to STDOUT.
+Enables a low-level mini-UART serial output driver for BCM2835-compatible platforms very early in the boot process. This driver assumes the mini-UART has been configured by the boot loader. On a Raspberry Pi 3+, this is done by including `enable_uart=1` in config.txt. When debugging with QEMU, use `-serial null -serial stdio` to redirect the mini-UART to STDOUT.
 
 #### `bcm2835_pl011_uart_debug`
 
-Enables a low-level PL011 UART serial output driver for BCM2835-compatible platforms very early in the boot process. This driver assumes the PL011 UART has been configured by the boot loader. On a Raspberry Pi 2, this is done by including `enable_uart=1` in `config.txt`. When debugging in QEMU, use `-serial stdio -serial null` to redirect the PL011 UART to STDOUT.
+Enables a low-level PL011 UART serial output driver for BCM2835-compatible platforms very early in the boot process. This driver assumes the PL011 UART has been configured by the boot loader. On a Raspberry Pi 2, this is done by including `enable_uart=1` in config.txt. When debugging in QEMU, use `-serial stdio -serial null` to redirect the PL011 UART to STDOUT.
 
 ## QEMU Debugging
 
