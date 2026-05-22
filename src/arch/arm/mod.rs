@@ -201,7 +201,7 @@ pub fn init(config_addr: usize) {
   #[cfg(feature = "serial_debug_output")]
   init_serial_debug_output(kconfig.virtual_base, kconfig.kernel_pages_start, &mut allocator);
 
-  debug_print!("=== Propeller (ARM 32-bit) ===\n");
+  debug_print!("\n\n=== Propeller (ARM 32-bit) ===\n");
   debug_print!("Booting on core {:x}.\n", cpu::get_id());
 
   // Require 4 KiB pages.

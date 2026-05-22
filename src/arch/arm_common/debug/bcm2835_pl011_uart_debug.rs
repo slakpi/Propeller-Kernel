@@ -1,13 +1,13 @@
-//! BCM2835 Mini-UART Serial Debug Output Driver
+//! BCM2835 PL011 UART Serial Debug Output Driver
 //!
 //! A low-level serial debug output driver that assumes a BCM2835-compatible
 //! SoC. The kernel must map the physical range provided by
 //! `get_physical_range()` into the kernel's address space and provide the base
 //! virtual address of the range to `init()`.
 //!
-//! The driver assumes the bootloader has configured the mini-UART. For example,
-//! on a Raspberry Pi 3+ platform, this can be done by adding the following to
-//! the config.txt file:
+//! The driver assumes the bootloader has configured the PL011 UART. For
+//! example, on a Raspberry Pi 2 platform, this can be done by adding the
+//! following to the config.txt file:
 //!
 //!   [all]
 //!   enable_uart=1
@@ -16,13 +16,13 @@ use crate::sync::SpinLock;
 use core::ptr;
 
 /// BCM2835 mini-UART registers.
-const AUX_MU_IO_REG: usize = 0x40;
-const AUX_MU_LSR_REG: usize = 0x54;
+const UART_DR_REG: usize = 0x0;
+const UART_FR_REG: usize = 0x18;
 
-const AUX_MU_LSR_TX_IDLE: u32 = 1 << 6;
+const UART_FR_FIFO_FULL: u32 = 1 << 5;
 
 /// The base physical address of the BCM2835 serial device registers.
-const PHYSICAL_BASE_ADDRESS: usize = 0x3f21_5000;
+const PHYSICAL_BASE_ADDRESS: usize = 0x3f20_1000;
 
 /// The size of the range to map in bytes.
 const PHYSICAL_SIZE: usize = 0x1000;
@@ -72,8 +72,8 @@ pub fn put_bytes(s: &[u8]) {
   let guard = unsafe { ptr::addr_of!(DRIVER_LOCK).as_ref().unwrap() }.lock();
 
   for c in s {
-    while reg_get(AUX_MU_LSR_REG) & AUX_MU_LSR_TX_IDLE == 0 {}
-    reg_put(AUX_MU_IO_REG, *c as u32);
+    while reg_get(UART_FR_REG) & UART_FR_FIFO_FULL != 0 {}
+    reg_put(UART_DR_REG, *c as u32);
   }
 }
 

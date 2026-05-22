@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="ARMv7a (QEMU + Tests)" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --config .cargo/config-qemu.toml --target armv7a-none-eabi --features=&quot;bcm2835_mini_uart_debug,module_tests&quot; -- --image kernel7.img" />
+    <option name="command" value="run --config .cargo/config-qemu.toml --target armv7a-none-eabi --features=&quot;bcm2835_pl011_uart_debug,module_tests&quot; -- --image kernel7.img" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />
     <option name="emulateTerminal" value="true" />

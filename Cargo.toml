@@ -18,3 +18,4 @@ cc = "1.0"
 module_tests = []
 serial_debug_output = []
 bcm2835_mini_uart_debug = ["serial_debug_output"]
+bcm2835_pl011_uart_debug = ["serial_debug_output"]
