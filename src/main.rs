@@ -63,5 +63,5 @@ fn run_module_tests() {
   debug_print!("--- Running Module Tests ---\n");
   arch::run_tests();
   mm::run_tests();
-  support::bits::run_tests();
+  support::run_tests();
 }

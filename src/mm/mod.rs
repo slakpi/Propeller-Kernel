@@ -1,15 +1,13 @@
 //! Memory Management
 
-mod page_allocator;
-mod slab_allocator;
+pub mod page_allocator;
+pub mod slab_allocator;
 
 use crate::arch;
 use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::debug_print;
 use crate::support::bits;
 use crate::sync::{SpinLock, SpinLockGuard};
-#[cfg(feature = "module_tests")]
-use crate::test;
 use core::ptr;
 use page_allocator::BuddyPageAllocator;
 
@@ -251,7 +249,7 @@ fn get_zone_index(zone: MemoryZone) -> Option<usize> {
 /// Run the memory management tests.
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {
-  let mut context = test::TestContext::new();
+  let mut context = crate::test::TestContext::new();
   debug_print!(" mm:\n");
   page_allocator::run_tests(&mut context);
   slab_allocator::run_tests(&mut context);

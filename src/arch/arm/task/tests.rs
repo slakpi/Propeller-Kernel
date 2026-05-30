@@ -11,7 +11,7 @@ use core::slice;
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
-  execute_test!(context, test_local_mappings);
+  execute_test!(context, task, test_local_mappings);
 }
 
 /// Test local mappings.

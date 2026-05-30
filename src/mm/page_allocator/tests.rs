@@ -64,14 +64,14 @@ struct AllocatorState<'a> {
 /// Test entry-point.
 pub fn run_tests(context: &mut test::TestContext) {
   debug_assert!(memory::MEMORY_SIZE >= TOTAL_MEM_SIZE);
-  execute_test!(context, test_size_calculation);
-  execute_test!(context, test_level_construction);
-  execute_test!(context, test_metadata_front_load);
-  execute_test!(context, test_metadata_end_load);
-  execute_test!(context, test_available_regions);
-  execute_test!(context, test_construction_errors);
-  execute_test!(context, test_allocation);
-  execute_test!(context, test_free);
+  execute_test!(context, page_allocator, test_size_calculation);
+  execute_test!(context, page_allocator, test_level_construction);
+  execute_test!(context, page_allocator, test_metadata_front_load);
+  execute_test!(context, page_allocator, test_metadata_end_load);
+  execute_test!(context, page_allocator, test_available_regions);
+  execute_test!(context, page_allocator, test_construction_errors);
+  execute_test!(context, page_allocator, test_allocation);
+  execute_test!(context, page_allocator, test_free);
 }
 
 /// Test calculating the size required for the allocator metadata.

@@ -19,14 +19,14 @@ const TEST_BITS: usize = 32;
 /// # Parameters
 ///
 /// * `context` - The test context.
-pub fn run_bitmap_tests(context: &mut test::TestContext) {
-  execute_test!(context, test_construction);
-  execute_test!(context, test_bit_set);
-  execute_test!(context, test_bit_clear);
-  execute_test!(context, test_bit_toggle);
-  execute_test!(context, test_bit_test);
-  execute_test!(context, test_first_zero);
-  execute_test!(context, test_bit_iterator);
+pub fn run_tests(context: &mut test::TestContext) {
+  execute_test!(context, bits, test_construction);
+  execute_test!(context, bits, test_bit_set);
+  execute_test!(context, bits, test_bit_clear);
+  execute_test!(context, bits, test_bit_toggle);
+  execute_test!(context, bits, test_bit_test);
+  execute_test!(context, bits, test_first_zero);
+  execute_test!(context, bits, test_bit_iterator);
 }
 
 /// Test construction of a Bitmap.

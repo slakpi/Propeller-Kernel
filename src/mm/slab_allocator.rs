@@ -54,8 +54,6 @@ use crate::arch::memory::PageAllocator;
 use crate::arch::{self, cpu};
 use crate::support::bits;
 use crate::sync::SpinLock;
-#[cfg(feature = "module_tests")]
-use crate::test;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
@@ -386,7 +384,7 @@ where
     node.avail -= 1;
     node.free = obj.next;
     node.update_checksum();
-    obj.next = bits::POISON;
+    obj.next = bits::POISON_WORD;
 
     // If all objects have been allocated, move the slab to the empty list.
     if node.avail == 0 {
@@ -452,7 +450,7 @@ where
     // Add the object back to the slab's free list. Verify that the next pointer
     // is set to the poison bits to detect a double free or memory overrun.
     let obj = Self::get_object_mut(obj_addr);
-    assert_eq!(obj.next, bits::POISON);
+    assert_eq!(obj.next, bits::POISON_WORD);
     obj.next = node.free;
     node.avail += 1;
     node.free = obj_addr;
@@ -484,11 +482,11 @@ where
       node_addr = node.next;
 
       // Poison the node.
-      node.avail = bits::POISON;
-      node.free = bits::POISON;
-      node.prev = bits::POISON;
-      node.next = bits::POISON;
-      node.checksum = bits::POISON;
+      node.avail = bits::POISON_WORD;
+      node.free = bits::POISON_WORD;
+      node.prev = bits::POISON_WORD;
+      node.next = bits::POISON_WORD;
+      node.checksum = bits::POISON_WORD;
 
       // Free the slab back to the page allocator.
       let slab_addr = bits::align_down(node_addr, slab_size);
@@ -521,9 +519,7 @@ where
   fn alloc_slab(&mut self, allocator: &SpinLock<A>) -> Option<usize> {
     // Attempt to allocate a slab. We can discard the number of pages actually
     // allocated.
-    let Some((phys_addr, _)) = allocator.lock().alloc(self.slab_pages) else {
-      return None;
-    };
+    let (phys_addr, _) = allocator.lock().alloc(self.slab_pages)?;
 
     // Get the node at the end of the slab assuming linear memory.
     let slab_size = self.slab_pages * arch::get_page_size();
@@ -613,7 +609,7 @@ where
     }
 
     let wrapper = Self::get_bundle_wrapper_mut(bundle_addr);
-    assert_eq!(wrapper.next, bits::POISON);
+    assert_eq!(wrapper.next, bits::POISON_WORD);
     wrapper.next = *list;
     *list = bundle_addr;
   }
@@ -650,7 +646,7 @@ where
     let bundle_addr = self.empty;
     let wrapper = Self::get_bundle_wrapper_mut(self.empty);
     self.empty = wrapper.next;
-    wrapper.next = bits::POISON;
+    wrapper.next = bits::POISON_WORD;
 
     Some(bundle_addr)
   }
@@ -685,7 +681,7 @@ where
     let ret_addr = self.full;
     let wrapper = Self::get_bundle_wrapper_mut(self.full);
     self.full = wrapper.next;
-    wrapper.next = bits::POISON;
+    wrapper.next = bits::POISON_WORD;
 
     Some(ret_addr)
   }
@@ -906,14 +902,8 @@ where
     let ret = self.alloc_internal();
     arch::interrupts::restore_interrupt_state(irq_state);
 
-    let Some(addr) = ret else {
-      return None;
-    };
-
-    let Some(obj) = (unsafe { (addr as *mut T).as_mut() }) else {
-      return None;
-    };
-
+    let addr = ret?;
+    let obj = (unsafe { (addr as *mut T).as_mut() })?;
     obj.init();
 
     Some(KernelObject {
@@ -1158,6 +1148,6 @@ where
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests(context: &mut test::TestContext) {
+pub fn run_tests(context: &mut crate::test::TestContext) {
   tests::run_tests(context);
 }

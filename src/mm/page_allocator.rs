@@ -7,8 +7,6 @@ use crate::arch;
 use crate::arch::memory::{MemoryRange, PageAllocator};
 use crate::support::bits;
 use crate::task::Task;
-#[cfg(feature = "module_tests")]
-use crate::test;
 use core::{cmp, ptr, slice};
 
 /// Support blocks that are up to Page Size * 2^10 bytes. For example, with a
@@ -67,16 +65,16 @@ struct BlockLevel {
 ///
 ///   NOTE: The allocator is NOT thread-safe.
 ///   NOTE: The allocator does NOT protect against double-free bugs/attacks.
-pub struct BuddyPageAllocator<'alloc> {
+pub struct BuddyPageAllocator<'meta> {
   base: usize,
   size: usize,
   levels: [BlockLevel; BLOCK_LEVELS],
-  flags: &'alloc mut [usize],
+  flags: &'meta mut [usize],
   alloc_mem: usize,
   free_mem: usize,
 }
 
-impl<'alloc> BuddyPageAllocator<'alloc> {
+impl<'meta> BuddyPageAllocator<'meta> {
   /// Calculate the amount of memory required for the allocator's metadata.
   ///
   /// # Parameters
@@ -194,7 +192,7 @@ impl<'alloc> BuddyPageAllocator<'alloc> {
   /// # Returns
   ///
   /// A node reference.
-  fn get_block_node(addr: usize) -> &'alloc BlockNode {
+  fn get_block_node(addr: usize) -> &'meta BlockNode {
     Self::get_block_node_mut(addr)
   }
 
@@ -216,7 +214,7 @@ impl<'alloc> BuddyPageAllocator<'alloc> {
   /// # Returns
   ///
   /// A mutable node reference.
-  fn get_block_node_mut(addr: usize) -> &'alloc mut BlockNode {
+  fn get_block_node_mut(addr: usize) -> &'meta mut BlockNode {
     let node = Self::get_block_node_unchecked_mut(addr);
     assert!(node.verify_checksum());
     node
@@ -240,7 +238,7 @@ impl<'alloc> BuddyPageAllocator<'alloc> {
   /// # Returns
   ///
   /// A mutable node reference assumed to be uninitialized.
-  fn get_block_node_unchecked_mut(addr: usize) -> &'alloc mut BlockNode {
+  fn get_block_node_unchecked_mut(addr: usize) -> &'meta mut BlockNode {
     let page_size = arch::get_page_size();
     assert_eq!(bits::align_down(addr, page_size), addr);
 
@@ -713,7 +711,7 @@ impl<'alloc> BuddyPageAllocator<'alloc> {
   }
 }
 
-impl<'memory> PageAllocator for BuddyPageAllocator<'memory> {
+impl<'meta> PageAllocator for BuddyPageAllocator<'meta> {
   const MAX_BLOCK_PAGES: usize = 1 << (BLOCK_LEVELS - 1);
 
   /// See `PageAllocator::alloc`.
@@ -738,6 +736,6 @@ impl<'memory> PageAllocator for BuddyPageAllocator<'memory> {
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests(context: &mut test::TestContext) {
+pub fn run_tests(context: &mut crate::test::TestContext) {
   tests::run_tests(context);
 }

@@ -1,7 +1,8 @@
 //! Common Memory Configuration Utilities
 
+use crate::arch;
 use crate::support::{bits, range, range_set};
-use core::cmp;
+use core::{cmp, ptr};
 
 /// Memory zone tags.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -79,12 +80,37 @@ pub trait PageAllocator {
   /// allocated.
   fn alloc(&mut self, pages: usize) -> Option<(usize, usize)>;
 
+  /// Allocate a physicall-contiguous block of pages from memory and zero it.
+  ///
+  /// # Parameters
+  ///
+  /// * `pages` - The minimum number of pages to allocate.
+  ///
+  /// # Description
+  ///
+  /// See `PageAllocator::alloc()` for the guarantees provided.
+  ///
+  /// Refer to: https://docs.kernel.org/core-api/memory-allocation.html. This is
+  /// likely the best choice for most allocations, but it is most definitely the
+  /// right choice when allocating memory that will be given to a user process.
+  fn alloc_and_zero(&mut self, pages: usize) -> Option<(usize, usize)> {
+    let (addr, count) = self.alloc(pages)?;
+    let page_size = arch::get_page_size();
+    unsafe { ptr::write_bytes(addr as *mut u8, 0, count * page_size) };
+    Some((addr, count))
+  }
+
   /// Free a contiguous block of pages allocated by this allocator.
   ///
   /// # Parameters
   ///
-  /// * `addr` - The physical base address of the block.
+  /// * `addr` - The physical base address of the block. May be null.
   /// * `pages` - The number of pages to free.
+  ///
+  /// # Description
+  ///
+  /// If `addr` is null or `pages` is zero, no action is taken. It is safe to
+  /// pass in a dangling pointer if `pages` is zero.
   fn free(&mut self, addr: usize, pages: usize);
 
   /// Get the amount of memory currently allocated by this allocator in bytes.
@@ -158,12 +184,9 @@ impl<const BUFFER_SIZE: usize> PageAllocator for BufferedPageAllocator<BUFFER_SI
       return None;
     }
 
-    if let Some(z) = self.bitmap.first_zero() {
-      self.bitmap.set_bit(z);
-      return Some((self.start_addr + (z * self.page_size), 1));
-    }
-
-    None
+    let z = self.bitmap.first_zero()?;
+    self.bitmap.set_bit(z);
+    Some((self.start_addr + (z * self.page_size), 1))
   }
 
   /// See `PageAllocator::free`.

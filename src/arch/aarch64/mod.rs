@@ -14,8 +14,6 @@ use super::arm_common::{dtb_cpu, dtb_memory};
 use crate::arch::memory::PageAllocator;
 use crate::debug_print;
 use crate::support::{bits, dtb, range};
-#[cfg(feature = "module_tests")]
-use crate::test;
 use core::{ptr, slice};
 use memory::{
   BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone,
@@ -550,8 +548,8 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
 
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {
-  let mut context = test::TestContext::new();
+  let mut context = crate::test::TestContext::new();
   debug_print!(" arch:\n");
-  crate::arch::task::run_tests(&mut context);
+  task::run_tests(&mut context);
   debug_print!("  {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

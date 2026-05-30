@@ -7,8 +7,6 @@ use super::mm;
 use crate::arch::cpu;
 use crate::arch::cpu::MAX_CORES;
 use crate::support::bits;
-#[cfg(feature = "module_tests")]
-use crate::{execute_test, test};
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -284,6 +282,6 @@ pub fn set_current_task_addr(addr: usize) {
 }
 
 #[cfg(feature = "module_tests")]
-pub fn run_tests(context: &mut test::TestContext) {
+pub fn run_tests(context: &mut crate::test::TestContext) {
   tests::run_tests(context);
 }

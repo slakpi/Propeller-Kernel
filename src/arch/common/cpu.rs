@@ -198,11 +198,8 @@ impl CoreConfig {
       return None;
     }
 
-    if let Some(id) = self.id_map.find(id) {
-      return Some(*id);
-    }
-
-    None
+    let id = self.id_map.find(id)?;
+    Some(*id)
   }
 
   /// Get the list of cores.

@@ -18,9 +18,21 @@ impl TestContext {
 
 #[macro_export]
 macro_rules! execute_test {
-  ($ctx:ident, $fn:ident) => {
-    debug_print!("  {}\n", stringify!($fn));
+  ($ctx:ident, $mod:ident, $fn:ident) => {
+    debug_print!("  {}: {}\n", stringify!($mod), stringify!($fn));
     $fn($ctx);
+  };
+}
+
+#[macro_export]
+macro_rules! check {
+  ($ctx:ident, $act:expr) => {
+    if !$act {
+      $ctx.fail_count += 1;
+      debug_print!("   FAIL: {} != true ({} {})\n", $act, file!(), line!());
+    } else {
+      $ctx.pass_count += 1;
+    }
   };
 }
 

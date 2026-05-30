@@ -8,7 +8,10 @@
 pub const CHECKSUM_SEED: usize = 0x09a5_2af1_c62b_d04b;
 
 /// Poison value.
-pub const POISON: usize = 0xcccc_cccc_cccc_cccc;
+pub const POISON_WORD: usize = 0xcccc_cccc_cccc_cccc;
+
+/// Poison byte value.
+pub const POISON_BYTE: u8 = 0xcc;
 
 /// Fast 64-bit population count.
 ///
