@@ -1,6 +1,6 @@
 //! Bit Manipulation Tests
 
-use super::{Bitmap, WORD_BIT_SHIFT, WORD_BITS};
+use super::{Bitmap, WORD_BIT_SHIFT};
 use crate::debug_print;
 use crate::support::bits;
 use crate::{check_eq, check_neq, check_none, check_optional, execute_test, mark_fail, test};
@@ -101,7 +101,7 @@ fn test_bit_clear(context: &mut test::TestContext) {
   // Verify we cannot clear a bit past the end of the map.
   map.set_all_bits();
   map.clear_bit(TEST_BITS);
-  let (word, shift) = map.get_word_and_shift(TEST_BITS);
+  let (word, _) = map.get_word_and_shift(TEST_BITS);
   check_eq!(context, map.bitmap[word], usize::MAX);
 
   // Test clearing all bits.
@@ -143,7 +143,7 @@ fn test_bit_toggle(context: &mut test::TestContext) {
   // Verify we cannot toggle a bit past the end of the map.
   map.set_all_bits();
   map.toggle_bit(TEST_BITS);
-  let (word, shift) = map.get_word_and_shift(TEST_BITS);
+  let (word, _) = map.get_word_and_shift(TEST_BITS);
   check_eq!(context, map.bitmap[word], usize::MAX);
 
   // Test toggling all bits.
@@ -253,7 +253,7 @@ fn test_bit_iterator(context: &mut test::TestContext) {
 
   // Verify zero iterations.
   map.clear_all_bits();
-  for t in &map {
+  for _ in &map {
     mark_fail!(context, "Too many iterations.");
     break;
   }

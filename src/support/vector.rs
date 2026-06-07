@@ -15,10 +15,9 @@
 #[cfg(feature = "module_tests")]
 mod tests;
 
+use crate::arch;
 use crate::arch::memory::PageAllocator;
-use crate::support::bits;
 use crate::sync::spin_lock::SpinLock;
-use crate::{arch, debug_print};
 use core::ops::{Index, IndexMut};
 use core::ptr::{self, NonNull};
 use core::slice::{Iter, IterMut};
@@ -245,7 +244,6 @@ where
       return;
     }
 
-    let virt_base = arch::get_kernel_virtual_base();
     let page_size = arch::get_page_size();
     let req_size = (self.length + additional) * size_of::<T>();
     let req_pages = (req_size + page_size - 1) / page_size;
@@ -294,7 +292,6 @@ where
   /// If unable to allocate a smaller block of memory, the vector is left
   /// unmodified.
   pub fn shrink_to_fit(&mut self) {
-    let virt_base = arch::get_kernel_virtual_base();
     let page_size = arch::get_page_size();
     let req_pages = (self.length * size_of::<T>() + page_size - 1) / page_size;
 

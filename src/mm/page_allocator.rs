@@ -22,20 +22,6 @@ struct BlockNode {
 }
 
 impl BlockNode {
-  /// Construct a new block node with a checksum.
-  ///
-  /// # Parameters
-  ///
-  /// * `next` - The physical address of the next node.
-  /// * `prev` - The physical address of the previous node.
-  fn new(next: usize, prev: usize) -> Self {
-    Self {
-      next,
-      prev,
-      checksum: bits::xor_checksum(&[next, prev]),
-    }
-  }
-
   /// Update a node's checksum with the current contents.
   fn update_checksum(&mut self) {
     self.checksum = bits::xor_checksum(&[self.prev, self.next]);

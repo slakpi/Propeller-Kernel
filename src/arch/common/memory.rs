@@ -2,7 +2,7 @@
 
 use crate::arch;
 use crate::support::{bits, range, range_set};
-use core::{cmp, ptr};
+use core::ptr;
 
 /// Memory zone tags.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -133,8 +133,6 @@ pub struct BufferedPageAllocator<const BITMAP_WORDS: usize> {
 }
 
 impl<const BITMAP_WORDS: usize> BufferedPageAllocator<BITMAP_WORDS> {
-  const BITMAP_INITIALIZER: [usize; BITMAP_WORDS] = [0; BITMAP_WORDS];
-
   /// Construct a new allocator with a pre-allocated block of memory.
   ///
   /// # Parameters

@@ -8,7 +8,6 @@ mod tests;
 
 pub use crate::arch::bits::*;
 
-use crate::debug_print;
 use core::cmp;
 
 /// The number of bits in a machine word.

@@ -7,7 +7,7 @@ use crate::debug_print;
 use crate::support::bits;
 use crate::test::{self, memory};
 use crate::{check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail};
-use core::{iter, ptr, slice};
+use core::{iter, ptr};
 
 /// Test with 2047 pages. The non-power of 2 tests proper setup and accounting.
 const TEST_PAGE_COUNT: usize = 2047;
@@ -144,7 +144,7 @@ fn test_level_construction(context: &mut test::TestContext) {
 ///
 ///   ...etc...
 fn test_metadata_front_load(context: &mut test::TestContext) {
-  let mut allocator = make_allocator(memory::PAGE_SIZE);
+  let allocator = make_allocator(memory::PAGE_SIZE);
   let (base_addr, _) = get_addrs();
 
   verify_allocator(
@@ -201,7 +201,7 @@ fn test_metadata_front_load(context: &mut test::TestContext) {
 ///
 ///  ...etc...
 fn test_metadata_end_load(context: &mut test::TestContext) {
-  let mut allocator = make_allocator(0);
+  let allocator = make_allocator(0);
   let (base_addr, _) = get_addrs();
 
   verify_allocator(
@@ -232,7 +232,6 @@ fn test_metadata_end_load(context: &mut test::TestContext) {
 /// * `context` - The test context.
 fn test_available_regions(context: &mut test::TestContext) {
   let (base_addr, meta_addr) = get_addrs();
-  let virt_base = arch::get_kernel_virtual_base();
   let meta = meta_addr as *mut u8;
 
   // Set up the available memory to have two holes:
@@ -420,7 +419,7 @@ fn test_free(context: &mut test::TestContext) {
 
   let mut mask = 0;
   let mut addr = base_addr;
-  for j in 0..TEST_PAGE_COUNT {
+  for _ in 0..TEST_PAGE_COUNT {
     allocator.free(addr, 1);
     mask += 1;
     addr += memory::PAGE_SIZE;

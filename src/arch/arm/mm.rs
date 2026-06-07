@@ -2,7 +2,7 @@
 
 use crate::arch::memory::{MappingStrategy, PageAllocator};
 use crate::support::bits;
-use core::{cmp, ptr, slice};
+use core::{ptr, slice};
 
 unsafe extern "C" {
   fn mmu_update_table_entry_local(

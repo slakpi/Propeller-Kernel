@@ -1,7 +1,7 @@
 //! ARM Common DTB Memory Scanner
 
-use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone};
-use crate::support::{dtb, hash, hash_map, range, range_set};
+use crate::arch::memory::{MemoryConfig, MemoryRangeHandler};
+use crate::support::{dtb, hash, hash_map};
 use core::cmp::{self, Ordering};
 
 /// Tags for expected properties and values.
@@ -167,10 +167,7 @@ impl<'mem> DtbMemoryScanner<'mem> {
     }
 
     match reg {
-      Some((pos, size)) => {
-        self.add_memory_blocks(size, addr_cells, size_cells, reader, &pos);
-        Ok(())
-      }
+      Some((pos, size)) => self.add_memory_blocks(size, addr_cells, size_cells, reader, &pos),
 
       _ => Ok(()),
     }

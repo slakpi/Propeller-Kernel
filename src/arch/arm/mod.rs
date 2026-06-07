@@ -13,7 +13,7 @@ pub use super::common::{device_tree, memory};
 use super::arm_common::{dtb_cpu, dtb_memory};
 use crate::arch::memory::PageAllocator;
 use crate::debug_print;
-use crate::support::{bits, dtb, range};
+use crate::support::{bits, dtb};
 use core::{ptr, slice};
 use memory::{
   BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone,
@@ -341,7 +341,7 @@ pub fn get_current_core_index() -> usize {
 
 /// Get the page database virtual base address.
 pub fn get_page_database_virtual_base() -> usize {
-  unsafe { PAGE_DATABASE_VIRTUAL_BASE }
+  PAGE_DATABASE_VIRTUAL_BASE
 }
 
 /// Get the size of the page database.

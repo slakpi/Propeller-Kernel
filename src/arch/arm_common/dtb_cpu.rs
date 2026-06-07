@@ -315,7 +315,6 @@ impl<'config> DtbCoreScanner<'config> {
     cursor: &mut dtb::DtbCursor,
   ) -> Result<u64, dtb::DtbError> {
     let mut tmp_cursor = *cursor;
-    let count = size / dtb::DtbReader::get_reg_pair_size(addr_cells, 0);
     let pair = reader
       .get_reg_pair(addr_cells, 0, &mut tmp_cursor)
       .ok_or(dtb::DtbError::InvalidDtb)?;

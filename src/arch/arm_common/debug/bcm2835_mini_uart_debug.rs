@@ -69,7 +69,7 @@ pub fn put_string(s: &str) {
 ///
 /// * `s` - The bytes to write.
 pub fn put_bytes(s: &[u8]) {
-  let guard = unsafe { ptr::addr_of!(DRIVER_LOCK).as_ref().unwrap() }.lock();
+  let _guard = unsafe { ptr::addr_of!(DRIVER_LOCK).as_ref().unwrap() }.lock();
 
   for c in s {
     while reg_get(AUX_MU_LSR_REG) & AUX_MU_LSR_TX_IDLE == 0 {}

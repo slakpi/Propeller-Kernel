@@ -58,7 +58,6 @@ use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::mem::{self, MaybeUninit};
 use core::ops::{Deref, DerefMut};
-use core::ptr;
 
 /// Slab node metadata.
 ///
@@ -89,24 +88,6 @@ struct SlabNode {
 }
 
 impl SlabNode {
-  /// Construct a new slab node with a checksum.
-  ///
-  /// # Parameters
-  ///
-  /// * `avail` - The number of available objects.
-  /// * `free` - The head of the free object list.
-  /// * `next` - The next slab node.
-  /// * `prev` - The previous slab node.
-  const fn new(avail: usize, free: usize, next: usize, prev: usize) -> Self {
-    Self {
-      avail,
-      free,
-      prev,
-      next,
-      checksum: bits::xor_checksum(&[avail, free, prev, next]),
-    }
-  }
-
   /// Update a node's checksum with the current contents.
   fn update_checksum(&mut self) {
     self.checksum = bits::xor_checksum(&[self.avail, self.free, self.prev, self.next]);

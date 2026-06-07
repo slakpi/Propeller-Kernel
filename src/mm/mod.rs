@@ -7,7 +7,7 @@ use crate::arch;
 use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::debug_print;
 use crate::support::bits;
-use crate::sync::{SpinLock, SpinLockGuard};
+use crate::sync::SpinLock;
 use core::ptr;
 use page_allocator::BuddyPageAllocator;
 
@@ -20,9 +20,6 @@ struct ZoneInfo {
   start_index: usize,
   end_index: usize,
 }
-
-/// Per-core page buffer size.
-const PER_CORE_PAGE_BUFFER_SIZE: usize = 256;
 
 /// Total number of zone allocators and their indices.
 const ZONE_ALLOCATOR_COUNT: usize = 2;
@@ -69,7 +66,7 @@ pub fn get_zone_allocator(
   zone: MemoryZone,
 ) -> &'static mut Option<SpinLock<BuddyPageAllocator<'static>>> {
   let index = get_zone_index(zone).unwrap();
-  let mut allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
+  let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
   &mut allocators[index]
 }
 
@@ -199,7 +196,6 @@ fn init_allocator_memory_config(
 ) -> usize {
   *alloc_config = *mem_config;
 
-  let page_size = arch::get_page_size();
   let meta_total = zone_info.iter().fold(0, |acc, z| acc + z.meta_size);
   let mut meta_base = 0;
 

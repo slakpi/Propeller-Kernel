@@ -13,7 +13,7 @@ pub use super::common::{device_tree, memory};
 use super::arm_common::{dtb_cpu, dtb_memory};
 use crate::arch::memory::PageAllocator;
 use crate::debug_print;
-use crate::support::{bits, dtb, range};
+use crate::support::{bits, dtb};
 use core::{ptr, slice};
 use memory::{
   BufferedPageAllocator, MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone,
@@ -520,7 +520,6 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
 
     // Each stack list entry is the core ID + stack address.
     let entry_offset = (index * 2) << bits::WORD_SHIFT;
-    let ptr = (kconfig.virtual_base + kconfig.kernel_stack_list + entry_offset) as *mut usize;
 
     // Calculate the virtual base address for the stack and update the stack
     // list with the core ID and stack start address.

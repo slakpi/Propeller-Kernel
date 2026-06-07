@@ -57,7 +57,7 @@ impl Task {
   ///
   /// * `task` - The task that will begin running.
   pub fn set_current_task(task: &Task) {
-    unsafe { set_current_task_addr(task as *const _ as usize) };
+    set_current_task_addr(task as *const _ as usize);
   }
 
   /// Get the task identifier.

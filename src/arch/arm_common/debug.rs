@@ -14,7 +14,6 @@ pub use bcm2835_pl011_uart_debug::*;
 
 use crate::support::print;
 use core::fmt::{self, Write};
-use core::ptr;
 
 const PRINT_BUFFER_SIZE: usize = 256;
 

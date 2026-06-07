@@ -1,11 +1,11 @@
 //! Slab Allocator Tests
 
 use super::{
-  BUNDLE_SIZE, BundleManager, BundleWrapper, Deinit, Init, KernelObject, ObjectWrapper,
-  SlabAllocator, SlabManager, SlabNode,
+  BUNDLE_SIZE, BundleManager, BundleWrapper, Deinit, Init, ObjectWrapper, SlabAllocator,
+  SlabManager, SlabNode,
 };
 use crate::arch;
-use crate::arch::memory::{MemoryRange, MemoryZone, PageAllocator};
+use crate::arch::memory::PageAllocator;
 use crate::debug_print;
 use crate::mm::page_allocator::BuddyPageAllocator;
 use crate::support::bits;
@@ -183,8 +183,7 @@ fn test_large_slab_manager(context: &mut test::TestContext) {
 /// * `context` - The test context.
 /// * `config` - The test configuration.
 fn test_initial_slab_manager_state<T>(context: &mut test::TestContext, config: &mut TestConfig) {
-  let mut slab_manager = SlabManager::<BuddyPageAllocator, T>::new();
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let slab_manager = SlabManager::<BuddyPageAllocator, T>::new();
 
   // Check metrics.
   check_eq!(context, slab_manager.slab_pages, config.slab_pages);
@@ -241,7 +240,7 @@ fn test_slab_manager_single_alloc<T>(context: &mut test::TestContext, config: &m
 ///
 /// Provide the slab manager with an allocator that is out of memory and verify
 /// it gracefully handles not being able to allocate a slab.
-fn test_slab_manager_fail_alloc<T>(context: &mut test::TestContext, config: &mut TestConfig) {
+fn test_slab_manager_fail_alloc<T>(context: &mut test::TestContext, _config: &mut TestConfig) {
   let mut slab_manager = SlabManager::<TestPageAllocator, T>::new();
   let mut allocator = SpinLock::new(make_test_page_allocator());
 
@@ -455,12 +454,10 @@ fn test_slab_manager_alloc_free_unused<T>(
 
     check_eq!(context, node.verify_checksum(), true);
 
-    match addr {
-      slab_a => seen += 1,
-      slab_b => seen += 1,
-      _ => {
-        mark_fail!(context, "Unknown slab address.");
-      }
+    if addr == slab_a || addr == slab_b {
+      seen += 1;
+    } else {
+      mark_fail!(context, "Unknown slab address.");
     }
 
     addr = node.next;
@@ -506,7 +503,7 @@ fn test_bundle_manager(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_bundle_manager_initial_state(context: &mut test::TestContext) {
-  let mut bundle_manager = BundleManager::<BuddyPageAllocator>::new();
+  let bundle_manager = BundleManager::<BuddyPageAllocator>::new();
   check_eq!(context, bundle_manager.empty, 0);
   check_eq!(context, bundle_manager.full, 0);
 }
@@ -632,12 +629,10 @@ fn test_bundle_manager_exchange_full(context: &mut test::TestContext) {
   while addr != 0 {
     let wrapper = BundleManager::<TestPageAllocator>::get_bundle_wrapper_mut(addr);
 
-    match addr {
-      bundle_a => seen += 1,
-      bundle_b => seen += 1,
-      _ => {
-        mark_fail!(context, "Unknown bundle address.");
-      }
+    if addr == bundle_a || addr == bundle_b {
+      seen += 1;
+    } else {
+      mark_fail!(context, "Unknown bundle address.");
     }
 
     addr = wrapper.next;
@@ -803,7 +798,7 @@ fn init_cache_with_empty_bundles(
   core_idx: usize,
 ) {
   let cache_array = unsafe { slab_alloc.cache.get().as_mut().unwrap() };
-  let mut cache = &mut cache_array[core_idx];
+  let cache = &mut cache_array[core_idx];
   cache.current = alloc_zeroed_bundle(slab_alloc);
   cache.curr_count = 0;
   cache.standby = alloc_zeroed_bundle(slab_alloc);
@@ -826,7 +821,7 @@ fn init_cache_with_full_bundles(
   core_idx: usize,
 ) {
   let cache_array = unsafe { slab_alloc.cache.get().as_mut().unwrap() };
-  let mut cache = &mut cache_array[core_idx];
+  let cache = &mut cache_array[core_idx];
   cache.current = alloc_full_bundle(slab_alloc, 1);
   cache.curr_count = BUNDLE_SIZE;
   cache.standby = alloc_full_bundle(slab_alloc, 1 + BUNDLE_SIZE);
@@ -848,7 +843,7 @@ fn init_cache_with_full_current_bundle(
   core_idx: usize,
 ) {
   let cache_array = unsafe { slab_alloc.cache.get().as_mut().unwrap() };
-  let mut cache = &mut cache_array[core_idx];
+  let cache = &mut cache_array[core_idx];
   cache.current = alloc_full_bundle(slab_alloc, 1);
   cache.curr_count = BUNDLE_SIZE;
   cache.standby = alloc_zeroed_bundle(slab_alloc);
@@ -871,7 +866,7 @@ fn init_cache_with_full_standby_bundle(
   core_idx: usize,
 ) {
   let cache_array = unsafe { slab_alloc.cache.get().as_mut().unwrap() };
-  let mut cache = &mut cache_array[core_idx];
+  let cache = &mut cache_array[core_idx];
   cache.current = alloc_zeroed_bundle(slab_alloc);
   cache.curr_count = 0;
   cache.standby = alloc_full_bundle(slab_alloc, BUNDLE_SIZE + 1);
@@ -882,7 +877,7 @@ fn init_cache_with_full_standby_bundle(
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_initial_state(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   let cache_array = unsafe { slab_alloc.cache.get().as_ref().unwrap() };
 
@@ -899,7 +894,7 @@ fn test_slab_allocator_initial_state(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_initial_alloc_fail(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   let cache_array = unsafe { slab_alloc.cache.get().as_ref().unwrap() };
   let core_idx = arch::get_current_core_index();
@@ -918,7 +913,7 @@ fn test_slab_allocator_initial_alloc_fail(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_bundle_alloc(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   let cache_array = unsafe { slab_alloc.cache.get().as_ref().unwrap() };
 
@@ -939,7 +934,7 @@ fn test_slab_allocator_bundle_alloc(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_cache_alloc(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   init_cache_with_full_bundles(slab_alloc, 0);
 
@@ -963,7 +958,7 @@ fn test_slab_allocator_bundle_swap_alloc(context: &mut test::TestContext) {
   // See `init_cache_with_full_standby_bundle()`.
   const EXPECTED_FAKE_ADDR: usize = 2 * BUNDLE_SIZE;
 
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   init_cache_with_full_standby_bundle(slab_alloc, 0);
 
@@ -994,7 +989,7 @@ fn test_slab_allocator_bundle_exchange_alloc(context: &mut test::TestContext) {
   // See `alloc_full_bundle()`.
   const EXPECTED_FAKE_ADDR: usize = BUNDLE_SIZE;
 
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   init_cache_with_empty_bundles(slab_alloc, 0);
 
@@ -1008,7 +1003,6 @@ fn test_slab_allocator_bundle_exchange_alloc(context: &mut test::TestContext) {
 
   // Save the current and standby bundle addresses.
   let old_current = cache_array[0].current;
-  let old_standby = cache_array[0].standby;
 
   // Allocate an object.
   let obj = slab_alloc.alloc_internal();
@@ -1028,7 +1022,7 @@ fn test_slab_allocator_bundle_exchange_alloc(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_bundle_cache_free(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   let cache_array = unsafe { slab_alloc.cache.get().as_ref().unwrap() };
 
@@ -1065,7 +1059,7 @@ fn test_slab_allocator_bundle_swap_free(context: &mut test::TestContext) {
   // See `init_cache_with_full_current_bundle()`.
   const EXPECTED_FAKE_ADDR: usize = BUNDLE_SIZE + 1;
 
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   init_cache_with_full_current_bundle(slab_alloc, 0);
 
@@ -1096,7 +1090,7 @@ fn test_slab_allocator_bundle_exchange_free(context: &mut test::TestContext) {
   // See `init_cache_with_full_bundles()`.
   const EXPECTED_FAKE_ADDR: usize = 2 * BUNDLE_SIZE + 1;
 
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   init_cache_with_full_bundles(slab_alloc, 0);
 
@@ -1110,7 +1104,6 @@ fn test_slab_allocator_bundle_exchange_free(context: &mut test::TestContext) {
 
   // Save the current and standby bundle addresses.
   let old_current = cache_array[0].current;
-  let old_standby = cache_array[0].standby;
 
   // Free a fake object.
   slab_alloc.free_internal(EXPECTED_FAKE_ADDR);
@@ -1130,7 +1123,7 @@ fn test_slab_allocator_bundle_exchange_free(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_bundle_direct_free(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   let cache_array = unsafe { slab_alloc.cache.get().as_mut().unwrap() };
 
@@ -1168,7 +1161,7 @@ fn test_slab_allocator_bundle_direct_free(context: &mut test::TestContext) {
 ///
 /// * `context` - The test context.
 fn test_slab_allocator_obj_init_deinit(context: &mut test::TestContext) {
-  let mut allocator = SpinLock::new(make_test_page_allocator());
+  let allocator = SpinLock::new(make_test_page_allocator());
   let slab_alloc = make_slab_allocator::<TestPageAllocator, SmallTestObject>(&allocator);
   let cache_array = unsafe { slab_alloc.cache.get().as_mut().unwrap() };
 

@@ -2,7 +2,7 @@
 
 use crate::arch::memory::{MappingStrategy, PageAllocator};
 use crate::support::bits;
-use core::{cmp, ptr, slice};
+use core::{ptr, slice};
 
 /// All levels use nine bits of the address for table indices.
 const TABLE_SHIFT: usize = 9;

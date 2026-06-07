@@ -245,7 +245,7 @@ pub fn init_bootstrap_context() -> TaskContext {
     INITIALIZED = true;
   }
 
-  let table_vaddr = unsafe { ptr::addr_of!(BOOTSTRAP_LOCAL_TABLE) as usize };
+  let table_vaddr = ptr::addr_of!(BOOTSTRAP_LOCAL_TABLE) as usize;
 
   // Set up the bootstrap local mapping table.
   //
