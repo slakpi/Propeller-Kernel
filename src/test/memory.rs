@@ -1,9 +1,10 @@
 //! Test Memory Utilities
 
 use crate::arch;
-use crate::arch::memory::{MemoryRange, MemoryZone, PageAllocator};
 use crate::mm::page_allocator::BuddyPageAllocator;
 use crate::support::bits;
+use crate::support::memory::{MemoryRange, MemoryZone, PageAllocator};
+use core::ptr;
 
 /// Test page size.
 ///
@@ -110,6 +111,12 @@ impl PageAllocator for TestPageAllocator {
     self.alloc_count += 1;
     self.alloc_total += 1 << bits::ceil_log2(pages);
     self.allocator.alloc(pages)
+  }
+
+  fn alloc_and_zero(&mut self, pages: usize) -> Option<(usize, usize)> {
+    let (addr, pages) = self.alloc(pages)?;
+    unsafe { ptr::write_bytes(addr as *mut u8, 0, pages * arch::get_page_size()) };
+    Some((addr, pages))
   }
 
   /// See `PageAllocator::free()`.

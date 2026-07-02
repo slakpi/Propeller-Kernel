@@ -1,7 +1,8 @@
 //! ARM Memory Management
 
-use crate::arch::memory::{MappingStrategy, PageAllocator};
+use crate::arch;
 use crate::support::bits;
+use crate::support::memory::{MappingStrategy, PageAllocator};
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -17,7 +18,7 @@ const LEVEL_1_TABLE_SHIFT_LONG: usize = 2;
 const LEVEL_2_TABLE_SHIFT_LONG: usize = 9;
 const LEVEL_3_TABLE_SHIFT_LONG: usize = 9;
 
-const LEVEL_3_SHIFT_LONG: usize = super::get_page_shift();
+const LEVEL_3_SHIFT_LONG: usize = arch::get_page_shift();
 const LEVEL_2_SHIFT_LONG: usize = LEVEL_3_SHIFT_LONG + LEVEL_3_TABLE_SHIFT_LONG;
 const LEVEL_1_SHIFT_LONG: usize = LEVEL_2_SHIFT_LONG + LEVEL_2_TABLE_SHIFT_LONG;
 
@@ -25,7 +26,7 @@ const LEVEL_1_INDEX_MASK_LONG: usize = (1 << LEVEL_1_TABLE_SHIFT_LONG) - 1;
 const LEVEL_2_INDEX_MASK_LONG: usize = (1 << LEVEL_2_TABLE_SHIFT_LONG) - 1;
 const LEVEL_3_INDEX_MASK_LONG: usize = (1 << LEVEL_3_TABLE_SHIFT_LONG) - 1;
 
-const TABLE_SIZE_LONG: usize = super::get_page_size();
+const TABLE_SIZE_LONG: usize = arch::get_page_size();
 
 /// If using 40-bit virtual addresses, bits [39:32] of the address are bits
 /// [7:0] of the high descriptor word.
@@ -55,7 +56,7 @@ const MM_DEVICE_MAIR_IDX_LONG: usize = 0x1;
 const TYPE_MASK: usize = 0x3;
 
 /// The maximum number of local mappings a task can maintain.
-const MAX_LOCAL_MAPPINGS: usize = super::get_page_size() >> super::get_page_table_entry_shift();
+const MAX_LOCAL_MAPPINGS: usize = arch::get_page_size() >> arch::get_page_table_entry_shift();
 
 /// Translation table level. LPAE supports up to 3 levels of translation.
 #[derive(Copy, Clone, PartialEq)]
@@ -70,7 +71,7 @@ enum TableLevel {
 /// # Parameters
 ///
 /// * `virtual_base` - The kernel segment base address.
-/// * `split` - The virtual memory split.
+/// * `vm_split` - The virtual memory split.
 /// * `pages_start` - The physical address of the task's starting page table.
 /// * `base` - Base of the physical address range.
 /// * `size` - Size of the physical address range.
@@ -89,6 +90,7 @@ enum TableLevel {
 /// * The allocator *must* allocate pages in linear memory.
 pub fn direct_map_memory(
   virtual_base: usize,
+  vm_split: usize,
   pages_start: usize,
   base: usize,
   size: usize,
@@ -100,7 +102,7 @@ pub fn direct_map_memory(
 
   fill_table(
     virtual_base,
-    get_first_table_level(virtual_base, virt),
+    get_first_table_level(virtual_base, vm_split, virt),
     pages_start,
     virt,
     base,
@@ -116,6 +118,7 @@ pub fn direct_map_memory(
 /// # Parameters
 ///
 /// * `virtual_base` - The kernel segment base address.
+/// * `vm_split` - The virtual memory split.
 /// * `pages_start` - The physical address of the task's starting page table.
 /// * `virt` - Base of the virtual address range.
 /// * `base` - Base of the physical address range.
@@ -135,6 +138,7 @@ pub fn direct_map_memory(
 /// * The allocator *must* allocate pages in linear memory.
 pub fn map_memory(
   virtual_base: usize,
+  vm_split: usize,
   pages_start: usize,
   virt: usize,
   base: usize,
@@ -145,7 +149,7 @@ pub fn map_memory(
 ) {
   fill_table(
     virtual_base,
-    get_first_table_level(virtual_base, virt),
+    get_first_table_level(virtual_base, vm_split, virt),
     pages_start,
     virt,
     base,
@@ -160,6 +164,7 @@ pub fn map_memory(
 ///
 /// # Parameters
 ///
+/// * `vm_split` - The virtual memory split.
 /// * `pages_start` - The physical address of the starting kernel page table.
 /// * `local_virt` - The virtual address of the core's thread local area.
 /// * `table_addr` - The physical address of the task's local mappings table.
@@ -176,9 +181,14 @@ pub fn map_memory(
 /// # Assumptions
 ///
 /// The Level 1 and Level 2 page tables are in linear memory.
-pub fn map_thread_local_table(pages_start: usize, local_virt: usize, table_addr: usize) {
-  let virtual_base = super::get_kernel_virtual_base();
-  let start_level = get_first_table_level(virtual_base, local_virt);
+pub fn map_thread_local_table(
+  vm_split: usize,
+  pages_start: usize,
+  local_virt: usize,
+  table_addr: usize,
+) {
+  let virtual_base = arch::get_kernel_virtual_base();
+  let start_level = get_first_table_level(virtual_base, vm_split, local_virt);
   let l2_addr: usize;
 
   if start_level == TableLevel::Level1 {
@@ -227,7 +237,7 @@ pub fn map_page_local(
   assert!(count < MAX_LOCAL_MAPPINGS);
 
   let idx = count << 1;
-  let page_vaddr = section_vaddr + (count << super::get_page_shift());
+  let page_vaddr = section_vaddr + (count << arch::get_page_shift());
   let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
   let (desc, desc_high) = make_descriptor(TableLevel::Level3, page_addr, device).unwrap();
 
@@ -261,7 +271,7 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
     return;
   }
 
-  let page_vaddr = section_vaddr + ((count - 1) << super::get_page_shift());
+  let page_vaddr = section_vaddr + ((count - 1) << arch::get_page_shift());
   let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
 
   unsafe {
@@ -274,6 +284,7 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
 /// # Parameters
 ///
 /// * `virtual_base` - The kernel segment base address.
+/// * `vm_split` - The virtual memory split.
 /// * `virt_addr` - The virtual address.
 ///
 /// # Description
@@ -286,10 +297,8 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
 ///
 /// Level 2 if the virtual address is in the kernel address space and a 3/1
 /// split is in use. Otherwise, Level 1.
-fn get_first_table_level(virtual_base: usize, virt_addr: usize) -> TableLevel {
-  let split = super::get_kernel_config().vm_split;
-
-  if (virt_addr >= virtual_base) && (split == 3) {
+fn get_first_table_level(virtual_base: usize, vm_split: usize, virt_addr: usize) -> TableLevel {
+  if (virt_addr >= virtual_base) && (vm_split == 3) {
     TableLevel::Level2
   } else {
     TableLevel::Level1
@@ -399,8 +408,8 @@ fn fill_table_compact(
   device: bool,
   allocator: &mut impl PageAllocator,
 ) {
-  let page_size = super::get_page_size();
-  let section_size = super::get_section_size();
+  let page_size = arch::get_page_size();
+  let section_size = arch::get_section_size();
 
   assert!(bits::is_aligned(virt, page_size));
   assert!(bits::is_aligned(base, page_size));
@@ -482,7 +491,7 @@ fn fill_table_granular(
   device: bool,
   allocator: &mut impl PageAllocator,
 ) {
-  let page_size = super::get_page_size();
+  let page_size = arch::get_page_size();
 
   assert!(bits::is_aligned(virt, page_size));
   assert!(bits::is_aligned(base, page_size));
@@ -545,7 +554,7 @@ fn get_table_entry_size(table_level: TableLevel) -> usize {
   match table_level {
     TableLevel::Level1 => 1 << LEVEL_1_SHIFT_LONG,
     TableLevel::Level2 => 1 << LEVEL_2_SHIFT_LONG,
-    TableLevel::Level3 => super::get_page_size(),
+    TableLevel::Level3 => arch::get_page_size(),
   }
 }
 
@@ -713,7 +722,7 @@ fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<
   match table_level {
     TableLevel::Level3 => None,
     _ => {
-      if !bits::is_aligned(phys_addr, super::get_page_size()) {
+      if !bits::is_aligned(phys_addr, arch::get_page_size()) {
         return None;
       }
 

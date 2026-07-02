@@ -4,8 +4,8 @@
 mod tests;
 
 use crate::arch;
-use crate::arch::memory::{MemoryRange, PageAllocator};
 use crate::support::bits;
+use crate::support::memory::{MemoryRange, PageAllocator};
 use crate::task::Task;
 use core::{cmp, ptr, slice};
 
@@ -703,6 +703,13 @@ impl<'meta> PageAllocator for BuddyPageAllocator<'meta> {
   /// See `PageAllocator::alloc`.
   fn alloc(&mut self, pages: usize) -> Option<(usize, usize)> {
     self.allocate(pages)
+  }
+
+  /// See `PageAllocator::alloc_and_zero`.
+  fn alloc_and_zero(&mut self, pages: usize) -> Option<(usize, usize)> {
+    let (addr, pages) = self.alloc(pages)?;
+    unsafe { ptr::write_bytes(addr as *mut u8, 0, pages * arch::get_page_size()) };
+    Some((addr, pages))
   }
 
   /// See `PageAllocator::free`.

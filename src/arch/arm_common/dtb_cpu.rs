@@ -1,6 +1,7 @@
 //! ARM Common DTB CPU Scanner
 
-use super::cpu::{self, Core, CoreConfig, CoreEnableMethod};
+use crate::arch::cpu;
+use crate::support::core_config::{self, Core, CoreConfig, CoreEnableMethod};
 use crate::support::{dtb, hash, hash_map};
 use core::cmp;
 
@@ -169,7 +170,7 @@ impl<'config> DtbCoreScanner<'config> {
 
     // Reserve a spot in the configuration to ensure that we always add the
     // primary core.
-    if !is_primary && self.config.get_core_count() > cpu::MAX_CORES - 1 {
+    if !is_primary && self.config.get_core_count() > core_config::MAX_CORES - 1 {
       return Ok(());
     }
 

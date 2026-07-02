@@ -3,15 +3,16 @@
 #[cfg(feature = "module_tests")]
 mod tests;
 
-use crate::arch::cpu;
-use crate::support::bits;
+use crate::arch;
+use crate::support::{bits, core_config};
 
 unsafe extern "C" {
   fn task_get_current_task_addr() -> usize;
   fn task_set_current_task_addr(task: usize);
 }
 
-const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + usize::BITS as usize - 1) / usize::BITS as usize;
+const CPU_MASK_WORDS: usize =
+  (core_config::MAX_CORES + usize::BITS as usize - 1) / usize::BITS as usize;
 
 pub type AffinityMask = bits::Bitmap<CPU_MASK_WORDS>;
 
@@ -84,7 +85,7 @@ impl TaskContext {
   ///
   /// The virtual address of the mapped page.
   pub fn map_page(&mut self, page_addr: usize) -> usize {
-    super::get_kernel_virtual_base() + page_addr
+    arch::get_kernel_virtual_base() + page_addr
   }
 
   /// See `Task::unmap_page()`.

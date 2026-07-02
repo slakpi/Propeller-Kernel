@@ -1,4 +1,4 @@
-//! ARM Interrupt Management
+//! Architecture-Dependent Interrupt Utilities
 
 unsafe extern "C" {
   fn irq_mask_all_interrupts();

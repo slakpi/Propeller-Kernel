@@ -2,6 +2,7 @@
 
 use crate::arch::sync::{spin_lock, spin_try_lock, spin_unlock};
 use core::cell::UnsafeCell;
+use core::convert::{AsMut, AsRef};
 use core::ops::{Deref, DerefMut, Drop};
 use core::ptr;
 
@@ -30,19 +31,31 @@ impl<T> Drop for SpinLockGuard<'_, T> {
   }
 }
 
+impl<T> AsRef<T> for SpinLockGuard<'_, T> {
+  fn as_ref(&self) -> &T {
+    unsafe { &*self.lock.obj.get() }
+  }
+}
+
+impl<T> AsMut<T> for SpinLockGuard<'_, T> {
+  fn as_mut(&mut self) -> &mut T {
+    unsafe { &mut *self.lock.obj.get() }
+  }
+}
+
 impl<T> Deref for SpinLockGuard<'_, T> {
   type Target = T;
 
   /// Obtain a reference to the protected object.
   fn deref(&self) -> &Self::Target {
-    unsafe { self.lock.obj.get().as_ref().unwrap() }
+    unsafe { &*self.lock.obj.get() }
   }
 }
 
 impl<T> DerefMut for SpinLockGuard<'_, T> {
   /// Obtain a mutable reference to the protected object.
   fn deref_mut(&mut self) -> &mut Self::Target {
-    unsafe { self.lock.obj.get().as_mut().unwrap() }
+    unsafe { &mut *self.lock.obj.get() }
   }
 }
 

@@ -1,12 +1,13 @@
 //! Memory Management
 
+pub mod buffered_allocator;
 pub mod page_allocator;
 pub mod slab_allocator;
 
 use crate::arch;
-use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::debug_print;
 use crate::support::bits;
+use crate::support::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::sync::SpinLock;
 use core::ptr;
 use page_allocator::BuddyPageAllocator;

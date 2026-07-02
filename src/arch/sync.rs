@@ -1,4 +1,4 @@
-//! ARM Common Synchronization Primitives
+//! Architecture-Dependent Synchronization Utilities
 
 unsafe extern "C" {
   fn sync_spin_lock(lock_addr: usize);

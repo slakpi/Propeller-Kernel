@@ -1,16 +1,19 @@
 //! Support Module
 
-use crate::debug_print;
-
 pub mod bits;
+pub mod core_config;
 pub mod debug;
+pub mod device_tree;
 pub mod dtb;
 pub mod hash;
 pub mod hash_map;
+pub mod memory;
 pub mod print;
 pub mod range;
 pub mod range_set;
 pub mod vector;
+
+use crate::debug_print;
 
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {

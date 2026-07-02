@@ -1,4 +1,4 @@
-//! Common CPU Core Configuration Utilities
+//! Core Configuration Utilities
 
 use crate::support::{hash, hash_map};
 

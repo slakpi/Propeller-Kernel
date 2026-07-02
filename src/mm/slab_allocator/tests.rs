@@ -5,10 +5,10 @@ use super::{
   SlabManager, SlabNode,
 };
 use crate::arch;
-use crate::arch::memory::PageAllocator;
 use crate::debug_print;
 use crate::mm::page_allocator::BuddyPageAllocator;
 use crate::support::bits;
+use crate::support::memory::PageAllocator;
 use crate::sync::SpinLock;
 use crate::test;
 use crate::test::memory::{TestPageAllocator, make_test_page_allocator};

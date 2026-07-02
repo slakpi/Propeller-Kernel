@@ -1,6 +1,6 @@
 //! Vector Tests
 
-use crate::arch::memory::PageAllocator;
+use crate::support::memory::PageAllocator;
 use crate::support::{bits, vector::Vector};
 use crate::sync::SpinLock;
 use crate::test;

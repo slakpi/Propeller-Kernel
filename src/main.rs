@@ -14,9 +14,8 @@ mod task;
 #[cfg(feature = "module_tests")]
 mod test;
 
-use arch::memory::MemoryZone;
-use core::ops::DerefMut;
 use core::panic::PanicInfo;
+use support::memory::MemoryZone;
 
 /// Panic handler.
 ///
@@ -49,7 +48,7 @@ extern "C" fn pk_init(config: usize) {
   let alloc = mm::get_zone_allocator(MemoryZone::LinearMemoryZone)
     .as_mut()
     .unwrap();
-  arch::init_smp(alloc.lock().deref_mut());
+  arch::init_smp(alloc.lock().as_mut());
 }
 
 /// Scheduler entry point.

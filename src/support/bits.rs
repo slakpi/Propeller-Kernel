@@ -1,4 +1,4 @@
-//! Bit manipulation utilities.
+//! Bit Manipulation Utilities
 //!
 //! http://aggregate.org/MAGIC/
 //! http://graphics.stanford.edu/~seander/bithacks.html

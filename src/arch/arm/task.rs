@@ -4,9 +4,8 @@
 mod tests;
 
 use super::mm;
-use crate::arch::cpu;
-use crate::arch::cpu::MAX_CORES;
-use crate::support::bits;
+use crate::arch::{self, cpu};
+use crate::support::{bits, core_config};
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -14,7 +13,8 @@ unsafe extern "C" {
   fn task_set_current_task_addr(task: usize);
 }
 
-const CPU_MASK_WORDS: usize = (cpu::MAX_CORES + bits::WORD_BITS - 1) >> bits::WORD_BIT_SHIFT;
+const CPU_MASK_WORDS: usize =
+  (core_config::MAX_CORES + bits::WORD_BITS - 1) >> bits::WORD_BIT_SHIFT;
 
 pub type AffinityMask = bits::Bitmap<CPU_MASK_WORDS>;
 
@@ -80,8 +80,8 @@ impl TaskContext {
       return None;
     }
 
-    let index = (virt_addr - 0xc000_0000) >> super::get_section_shift();
-    Some(super::RECURSIVE_MAP_AREA + (index << super::get_page_shift()))
+    let index = (virt_addr - 0xc000_0000) >> arch::get_section_shift();
+    Some(super::init::get_recursive_map_area_virtual_base() + (index << arch::get_page_shift()))
   }
 
   /// Get the base virtual address of the thread local area for the current core.
@@ -97,9 +97,9 @@ impl TaskContext {
   ///
   ///   NOTE: Private to the ARM architecture.
   fn get_thread_local_virtual_base(core_idx: usize) -> usize {
-    assert!(core_idx < super::get_device_tree().get_core_config().get_core_count());
-    let offset = core_idx << super::get_section_shift();
-    unsafe { super::THREAD_LOCAL_AREA_VIRTUAL_BASE + offset }
+    assert!(core_idx < arch::get_device_tree().get_core_config().get_core_count());
+    let offset = core_idx << arch::get_section_shift();
+    super::init::get_thread_local_area_virtual_base() + offset
   }
 
   /// Construct an empty task context.
@@ -179,20 +179,20 @@ impl TaskContext {
     // If mapping a page in linear memory, return the linearly mapped address
     // and increment the map count. We do not need to pin the process to the
     // current core.
-    if page_addr < super::get_high_mem_base() {
+    if page_addr < super::init::get_high_mem_base() {
       self.map_count += 1;
-      return super::get_kernel_virtual_base() + page_addr;
+      return super::init::get_kernel_virtual_base() + page_addr;
     }
 
     // TODO: Interrupts need to be disabled before proceeding to ensure a
     //       context switch does not happen before the task is pinned.
 
-    let core_idx = super::get_current_core_index();
+    let core_idx = super::init::get_current_core_index();
 
     // Pin the core to the current core if not already pinned. If already
     // pinned, we should be on the same core.
     if self.pin_mask.is_none() {
-      let mut pin_mask = AffinityMask::new(MAX_CORES);
+      let mut pin_mask = AffinityMask::new(core_config::MAX_CORES);
       pin_mask.set_bit(core_idx);
       self.pin_mask = Some(pin_mask);
     }
@@ -219,7 +219,7 @@ impl TaskContext {
       return;
     }
 
-    let local_base = Self::get_thread_local_virtual_base(super::get_current_core_index());
+    let local_base = Self::get_thread_local_virtual_base(super::init::get_current_core_index());
     let table_vaddr = Self::get_page_virtual_address_for_virtual_address(local_base);
     let table = unsafe { slice::from_raw_parts_mut(table_vaddr.unwrap() as *mut usize, 1024) };
 
@@ -245,20 +245,21 @@ pub fn init_bootstrap_context() -> TaskContext {
     INITIALIZED = true;
   }
 
-  let table_vaddr = ptr::addr_of!(BOOTSTRAP_LOCAL_TABLE) as usize;
+  let table_vaddr = unsafe { ptr::addr_of!(BOOTSTRAP_LOCAL_TABLE) as usize };
 
   // Set up the bootstrap local mapping table.
   //
   //   NOTE: The bootstrap task's local mapping table is part of the kernel
   //         image in linear memory. It is safe to just subtract the virtual
   //         base to get the physical address.
-  let table_addr = table_vaddr - super::get_kernel_virtual_base();
+  let table_addr = table_vaddr - arch::get_kernel_virtual_base();
 
   // Map the task's local mapping table into the kernel address space using the
   // current core's table slot.
   mm::map_thread_local_table(
-    super::get_kernel_config().kernel_pages_start,
-    TaskContext::get_thread_local_virtual_base(super::get_current_core_index()),
+    super::init::get_vm_split(),
+    super::init::get_kernel_pages_start(),
+    TaskContext::get_thread_local_virtual_base(arch::get_current_core_index()),
     table_addr,
   );
 

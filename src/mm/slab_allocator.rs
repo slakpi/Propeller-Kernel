@@ -50,9 +50,9 @@
 #[cfg(feature = "module_tests")]
 mod tests;
 
-use crate::arch::memory::PageAllocator;
-use crate::arch::{self, cpu};
-use crate::support::bits;
+use crate::arch;
+use crate::support::memory::PageAllocator;
+use crate::support::{bits, core_config};
 use crate::sync::SpinLock;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
@@ -762,7 +762,7 @@ pub trait Deinit {
 ///         cache. UnsafeCell is used instead of RefCell to avoid the type
 ///         overhead of Ref and MutRef.
 pub struct SlabAllocator<'alloc, A, T> {
-  cache: UnsafeCell<[CoreCache; cpu::MAX_CORES]>,
+  cache: UnsafeCell<[CoreCache; core_config::MAX_CORES]>,
   obj_alloc: SpinLock<SlabManager<A, T>>,
   bundle_mgr: SpinLock<BundleManager<A>>,
   allocator: &'alloc SpinLock<A>,
@@ -775,8 +775,8 @@ where
 {
   const SINGLE_CACHE_INITIALIZER: CoreCache = CoreCache::new();
 
-  const CACHE_ARRAY_INITIALIZER: UnsafeCell<[CoreCache; cpu::MAX_CORES]> =
-    UnsafeCell::new([Self::SINGLE_CACHE_INITIALIZER; cpu::MAX_CORES]);
+  const CACHE_ARRAY_INITIALIZER: UnsafeCell<[CoreCache; core_config::MAX_CORES]> =
+    UnsafeCell::new([Self::SINGLE_CACHE_INITIALIZER; core_config::MAX_CORES]);
 
   const OBJ_ALLOC_INITIALIZER: SpinLock<SlabManager<A, T>> = SpinLock::new(SlabManager::new());
 

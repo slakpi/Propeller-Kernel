@@ -1,6 +1,6 @@
 //! ARM Common DTB Memory Scanner
 
-use crate::arch::memory::{MemoryConfig, MemoryRangeHandler};
+use crate::support::memory::{MemoryConfig, MemoryRangeHandler};
 use crate::support::{dtb, hash, hash_map};
 use core::cmp::{self, Ordering};
 

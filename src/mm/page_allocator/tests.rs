@@ -2,9 +2,9 @@
 
 use super::{BlockLevel, BuddyPageAllocator};
 use crate::arch;
-use crate::arch::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::debug_print;
 use crate::support::bits;
+use crate::support::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::test::{self, memory};
 use crate::{check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail};
 use core::{iter, ptr};

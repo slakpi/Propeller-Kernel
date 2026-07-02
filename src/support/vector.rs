@@ -16,7 +16,7 @@
 mod tests;
 
 use crate::arch;
-use crate::arch::memory::PageAllocator;
+use crate::support::memory::PageAllocator;
 use crate::sync::spin_lock::SpinLock;
 use core::ops::{Index, IndexMut};
 use core::ptr::{self, NonNull};

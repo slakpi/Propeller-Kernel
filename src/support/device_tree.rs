@@ -1,6 +1,6 @@
 //! System Device Tree Utilities
 
-use super::cpu::CoreConfig;
+use super::core_config::CoreConfig;
 use super::memory::{MemoryConfig, MemoryZone};
 
 /// System device tree.

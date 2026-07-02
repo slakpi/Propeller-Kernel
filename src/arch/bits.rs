@@ -1,4 +1,4 @@
-//! Architecture-Dependent Bit Manipulation Utilities Wrapper
+//! Architecture-Dependent Bit Manipulation Utilities
 
 #[cfg(target_pointer_width = "32")]
 mod bits32;
