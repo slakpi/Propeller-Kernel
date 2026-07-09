@@ -1,6 +1,8 @@
 //! Core Configuration Utilities
 
 use crate::support::{hash, hash_map};
+use crate::arch::{self, cpu};
+use crate::task::Task;
 
 /// 32-bit builds are limited to 16 cores. Thread-local page mapping requires
 /// each core to reserve a 2 MiB block in the kernel's address space. Limiting
@@ -27,10 +29,12 @@ pub enum CoreEnableMethod {
   Invalid,
   /// Spin tables park each core in a loop watching a specific memory address. A
   /// core is enabled by writing the kernel start address to the watch address.
+  /// The memory address is in CPU memory.
   SpinTable,
   /// BCM2836 is the Broadcom 2836 SoC mailbox enable method. It works the same
   /// way as the spin table method, but the watch addresses are defined in the
-  /// Broadcom specification rather than the DeviceTree.
+  /// Broadcom specification rather than the DeviceTree and are device addresses
+  /// not in CPU memory.
   Bcm2836,
 }
 
@@ -74,6 +78,43 @@ impl Core {
   /// address.
   pub fn get_release_addr(&self) -> usize {
     self.release_addr
+  }
+  
+  /// Release the core using its enable method.
+  /// 
+  /// # Parameters
+  /// 
+  /// * `start_addr` - The address at which the core should start.
+  pub fn release(&self, start_addr: usize) {
+    match self.enable_method {
+      CoreEnableMethod::SpinTable => self.release_via_spin_table(start_addr),
+      CoreEnableMethod::Bcm2836 => self.release_via_bcm2836(start_addr),
+      _ => panic!("Invalid enable method."),
+    }
+  }
+  
+  /// Release the core using a spin table.
+  ///
+  /// # Parameters
+  ///
+  /// * `start_addr` - The address at which the core should start.
+  fn release_via_spin_table(&self, start_addr: usize) {
+    // The release address is in physical memory, but not guaranteed to be
+    // mapped linearly on all architectures.
+    let task = Task::get_current_task_mut();
+    let phys_page = self.release_addr & arch::get_page_mask();
+    let offset = self.release_addr - phys_page;
+    let ptr = (task.map_page(phys_page) + offset) as *mut usize;
+    
+    unsafe { *ptr = start_addr; }
+    cpu::flush_data_cache_by_va(ptr as usize);
+    cpu::send_event();
+    
+    task.unmap_page();
+  }
+  
+  fn release_via_bcm2836(&self, start_addr: usize) {
+    todo!()
   }
 }
 

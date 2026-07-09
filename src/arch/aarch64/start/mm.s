@@ -84,8 +84,13 @@
 .equ MT_DEVICE_nGnRnE_ATTR,  0x00
 .equ MAIR_EL1_VALUE,         ((MT_DEVICE_nGnRnE_ATTR << MT_DEVICE_nGnRnE_SHIFT) | (MT_NORMAL_ATTR << MT_NORMAL_SHIFT))
 
-.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
+// Mark normal memory as inner shareable. See B2.7.1. Inner shareable ensures
+// coherency within the inner shareable domain. Per D8.5.2, this applies when
+// TCR_ELx.DS is 0.
+.equ MT_NORMAL_SH_INNER,     0x3
+
+.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | (MT_NORMAL_SH_INNER << 8) | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | (MT_NORMAL_SH_INNER << 8) | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RO_FLAGS, (MM_ACCESS_RO | (MT_DEVICE_nGnRnE_IDX << 2) | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RW_FLAGS, (MM_ACCESS_RW | (MT_DEVICE_nGnRnE_IDX << 2) | MM_ACCESS_FLAG)
 

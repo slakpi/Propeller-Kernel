@@ -96,7 +96,7 @@ impl Task {
     &mut self.context
   }
 
-  /// Maps a page into the kernel's address space.
+  /// Maps a *normal memory* page into the kernel's address space.
   ///
   /// # Parameters
   ///

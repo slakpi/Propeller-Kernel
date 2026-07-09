@@ -171,14 +171,22 @@ pub fn init(config_addr: usize) {
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
 pub fn init_smp(allocator: &mut impl PageAllocator) {
-  if get_device_tree().get_core_config().get_core_count() < 2 {
+  let config = get_device_tree().get_core_config();
+
+  // If the system only has a single core, it is already set up. There is no
+  // need to do anything else.
+  if config.get_core_count() < 2 {
     return;
   }
 
   debug_print!("--- SMP Initialization ---\n");
   init_isr_stacks(allocator);
 
-  debug_print!("arch SMP init complete.\n");
+  debug_print!("Releasing secondary cores...\n");
+  let start_addr = _secondary_start as *const () as usize - get_kernel_virtual_base();
+  for core in config.get_cores().iter().skip(1) {
+    core.release(start_addr);
+  }
 }
 
 /// Get the size of a page.
@@ -487,6 +495,8 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
 ///
 /// Assumes multiple cores.
 fn init_isr_stacks(allocator: &mut impl PageAllocator) {
+  const ENTRY_LEN: usize = 2;
+
   let kconfig = get_kernel_config();
   let core_config = get_device_tree().get_core_config();
   let page_shift = get_page_shift();
@@ -496,10 +506,10 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
   let table = unsafe {
     slice::from_raw_parts_mut(
       (kconfig.virtual_base + kconfig.kernel_stack_list) as *mut usize,
-      kconfig.page_size,
+      kconfig.page_size >> bits::WORD_SHIFT,
     )
   };
-  let mut entry_index = 2;
+  let mut entry_index = ENTRY_LEN;
 
   debug_print!("ISR Stacks:\n");
   debug_print!(" Core {:x}: EL1 {:#x}\n", table[0], table[1],);
@@ -531,6 +541,6 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
 
     debug_print!(" Core {:x}: EL1 {:#x}\n", table[entry_index], table[entry_index + 1],);
 
-    entry_index += 2;
+    entry_index += ENTRY_LEN;
   }
 }

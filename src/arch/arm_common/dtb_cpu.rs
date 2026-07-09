@@ -315,10 +315,24 @@ impl<'config> DtbCoreScanner<'config> {
     reader: &dtb::DtbReader,
     cursor: &mut dtb::DtbCursor,
   ) -> Result<u64, dtb::DtbError> {
-    let mut tmp_cursor = *cursor;
+    // Calculate the number of actual identifiers specified.
+    let count = size / dtb::DtbReader::get_reg_pair_size(addr_cells, 0);
+
+    // Read the first identifier and then move the cursor past any remaining
+    // identifiers.
+    //
+    //   TODO: I suppose multiple thread IDs would relate to some kind of scheme
+    //         similar to HyperThreading. I do not think that is a concern for
+    //         ARM platforms yet.
     let pair = reader
-      .get_reg_pair(addr_cells, 0, &mut tmp_cursor)
+      .get_reg_pair(addr_cells, 0, cursor)
       .ok_or(dtb::DtbError::InvalidDtb)?;
+    for _ in 1..count {
+      _ = reader
+        .get_reg_pair(addr_cells, 0, cursor)
+        .ok_or(dtb::DtbError::InvalidDtb)?;
+    }
+
     Ok(pair.0)
   }
 }

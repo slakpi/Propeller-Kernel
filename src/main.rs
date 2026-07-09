@@ -54,6 +54,7 @@ extern "C" fn pk_init(config: usize) {
 /// Scheduler entry point.
 #[unsafe(no_mangle)]
 extern "C" fn pk_scheduler() -> ! {
+  debug_print!("Core {:x} waiting for work...\n", arch::cpu::get_id());
   arch::cpu::halt();
 }
 

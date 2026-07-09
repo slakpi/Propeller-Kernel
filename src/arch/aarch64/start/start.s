@@ -316,7 +316,30 @@ primary_core_begin_virt_addressing:
 ///
 /// Boot a secondary core.
 secondary_core_boot:
-  b       cpu_halt
+// Enable the MMU.
+//
+//   NOTE: Manually set the link register to the virtual return address when
+//         calling `mmu_setup_and_enable`. Do not use branch-and-link.
+  adrp    x0, __kernel_id_pages_start
+  adrp    x1, __kernel_pages_start
+  ldr     lr, =secondary_core_begin_virt_addressing
+  b       mmu_setup_and_enable
+
+secondary_core_begin_virt_addressing:
+// Clean up the MMU setup now that the identity tables are not required.
+  bl      mmu_cleanup_ttbr
+
+// Finish setting up stacks.
+  bl      cpu_get_id        // Get the core ID and leave it in x0.
+  bl      setup_secondary_core_stack
+
+// Setup the exception vectors.
+  adr     x9, el1_vectors
+  msr     vbar_el1, x9
+
+  b       pk_scheduler
+
+// We will never return from the scheduler.
 
 
 ///-----------------------------------------------------------------------------
@@ -335,4 +358,50 @@ write_primary_core_stack_entry:
   str     x0, [x1, #8]
 
   fn_exit
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Set up the stack for a secondary core.
+///
+/// # Parameters
+///
+/// * x0 - The core ID
+///
+/// # Description
+///
+/// Searches the stack list for the current core ID and assigns the ISR stack
+/// pointer for EL1. If the current core ID is not found in the table, the
+/// function just halts the core.
+///
+///   NOTE: This function will be called by the secondary cores before they have
+///         stacks. This function MUST not modify callee-saved registers or call
+///         other functions.
+setup_secondary_core_stack:
+// x0 - Core ID
+// x1 - Table address
+// x2 - Table bound / temp
+// x3 - Temp
+
+// Find the core in the stack table. The stack list is a single page, so put a
+// bound on the loop for a single page. If the core is not found, just halt.
+  ldr     x1, =__kernel_stack_list
+  ldr     x2, =__page_size
+  add     x2, x1, x2
+
+1:
+  ldr     x3, [x1]          // Get the current stack record core ID
+  cmp     x3, x0            // Check the core ID
+  beq     2f                // Found the core!
+
+  add     x1, x1, #16       // Move to the next record
+  cmp     x1, x2            // Check if we have left the page
+  bge     cpu_halt          // Core not found, halt
+  b       1b                // Try the next record
+
+2:
+  ldr     x3, [x1, #8]      // Set the EL1 stack pointer
+  mov     sp, x3
+
   ret
