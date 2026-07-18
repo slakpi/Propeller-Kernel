@@ -1,5 +1,7 @@
 //! Basic Low-Level Module Testing Utilities
 
+use crate::arch::debug::debug_print;
+
 pub mod memory;
 
 pub struct TestContext {
@@ -17,9 +19,15 @@ impl TestContext {
 }
 
 #[macro_export]
+macro_rules! test_module {
+  ($mod:ident) => {
+    debug_print!("  {}\n", stringify!($mod));
+  };
+}
+
+#[macro_export]
 macro_rules! execute_test {
   ($ctx:ident, $mod:ident, $fn:ident) => {
-    debug_print!("  {}: {}\n", stringify!($mod), stringify!($fn));
     $fn($ctx);
   };
 }
@@ -29,7 +37,7 @@ macro_rules! check {
   ($ctx:ident, $act:expr) => {
     if !$act {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} != true ({} {})\n", $act, file!(), line!());
+      debug_print!("   FAIL: condition is false ({} {})\n", file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -142,6 +150,18 @@ macro_rules! check_optional {
     } else {
       $ctx.fail_count += 1;
       debug_print!("   FAIL: {} != {} ({} {})\n", stringify!($act), $exp, file!(), line!());
+    }
+  };
+}
+
+#[macro_export]
+macro_rules! check_result {
+  ($ctx:ident, $act:expr) => {
+    if let Err(e) = $act {
+      $ctx.fail_count += 1;
+      debug_print!("   FAIL: {} ({} {})\n", e, file!(), line!());
+    } else {
+      $ctx.pass_count += 1;
     }
   };
 }

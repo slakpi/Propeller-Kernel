@@ -3,7 +3,10 @@
 use super::{Bitmap, WORD_BIT_SHIFT};
 use crate::debug_print;
 use crate::support::bits;
-use crate::{check_eq, check_neq, check_none, check_optional, execute_test, mark_fail, test};
+use crate::test;
+use crate::{
+  check_eq, check_neq, check_none, check_optional, execute_test, mark_fail, test_module,
+};
 
 /// Maximum number of bits to store.
 const TEST_MAX_BITS: usize = 128;
@@ -20,6 +23,7 @@ const TEST_BITS: usize = 32;
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
+  test_module!(bits);
   execute_test!(context, bits, test_construction);
   execute_test!(context, bits, test_bit_set);
   execute_test!(context, bits, test_bit_clear);

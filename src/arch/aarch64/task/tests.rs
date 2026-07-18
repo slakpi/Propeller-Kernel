@@ -2,7 +2,8 @@
 
 use crate::debug_print;
 use crate::task::Task;
-use crate::{check_eq, execute_test, test};
+use crate::test;
+use crate::{check_eq, execute_test, test_module};
 use core::slice;
 
 /// Run task tests.
@@ -11,6 +12,7 @@ use core::slice;
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
+  test_module!(task);
   execute_test!(context, task, test_local_mappings);
 }
 

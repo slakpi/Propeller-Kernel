@@ -6,7 +6,9 @@ use crate::debug_print;
 use crate::support::bits;
 use crate::support::memory::{MemoryConfig, MemoryRange, MemoryZone};
 use crate::test::{self, memory};
-use crate::{check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail};
+use crate::{
+  check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail, test_module,
+};
 use core::{iter, ptr};
 
 /// Test with 2047 pages. The non-power of 2 tests proper setup and accounting.
@@ -64,6 +66,7 @@ struct AllocatorState<'a> {
 /// Test entry-point.
 pub fn run_tests(context: &mut test::TestContext) {
   debug_assert!(memory::MEMORY_SIZE >= TOTAL_MEM_SIZE);
+  test_module!(page_allocator);
   execute_test!(context, page_allocator, test_size_calculation);
   execute_test!(context, page_allocator, test_level_construction);
   execute_test!(context, page_allocator, test_metadata_front_load);

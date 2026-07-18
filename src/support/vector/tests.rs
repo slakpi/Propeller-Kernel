@@ -1,12 +1,12 @@
 //! Vector Tests
 
+use crate::arch;
 use crate::support::memory::PageAllocator;
 use crate::support::{bits, vector::Vector};
 use crate::sync::SpinLock;
 use crate::test;
 use crate::test::memory::{TestPageAllocator, make_test_page_allocator, reset_test_memory};
-use crate::{arch, debug_print};
-use crate::{check, check_eq, check_none, check_not_none, execute_test};
+use crate::{check, check_eq, check_none, check_not_none, debug_print, execute_test, test_module};
 use core::slice;
 
 /// A relatively large test structure that keeps capacity small so that we do
@@ -40,6 +40,7 @@ impl Drop for TestStruct {
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
+  test_module!(vector);
   execute_test!(context, vector, test_initialization);
   execute_test!(context, vector, test_reserve);
   execute_test!(context, vector, test_reserve_alloc_fail);

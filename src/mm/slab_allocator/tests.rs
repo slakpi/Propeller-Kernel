@@ -12,7 +12,9 @@ use crate::support::memory::PageAllocator;
 use crate::sync::SpinLock;
 use crate::test;
 use crate::test::memory::{TestPageAllocator, make_test_page_allocator};
-use crate::{check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail};
+use crate::{
+  check_eq, check_neq, check_none, check_not_none, execute_test, mark_fail, test_module,
+};
 use core::{mem, ptr};
 
 /// A small object for testing the slab allocator.
@@ -126,6 +128,7 @@ static mut LARGE_OBJ_ADDRS: [usize; LARGE_OBJ_PER_SLAB + 1] = [0; LARGE_OBJ_PER_
 ///
 /// * `context` - The test context.
 pub fn run_tests(context: &mut test::TestContext) {
+  test_module!(slab_allocator);
   execute_test!(context, slab_allocator, test_small_slab_manager);
   execute_test!(context, slab_allocator, test_large_slab_manager);
   execute_test!(context, slab_allocator, test_bundle_manager);

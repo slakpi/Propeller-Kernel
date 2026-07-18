@@ -11,6 +11,10 @@
 //!
 //!   NOTE: Vectors must be contiguous memory. As such, they can never be larger
 //!         than the largest block allowed by the provided allocator.
+//!
+//!   NOTE: Inserting and deleting objects involves copies and reallocation of
+//!         the vector to accommodate an inserted object involves copying the
+//!         entire vector. Vectors should not be used with large data types.
 
 #[cfg(feature = "module_tests")]
 mod tests;
@@ -23,7 +27,7 @@ use core::ptr::{self, NonNull};
 use core::slice::{Iter, IterMut};
 
 /// A simple vector based on std::vec::Vec.
-struct Vector<'alloc, A, T>
+pub struct Vector<'alloc, A, T>
 where
   A: PageAllocator,
   T: Sized,
@@ -457,6 +461,7 @@ where
   type Item = &'vec T;
   type IntoIter = Iter<'vec, T>;
 
+  /// See `IntoIterator::into_iter()`.
   fn into_iter(self) -> Self::IntoIter {
     self.iter()
   }
@@ -470,6 +475,7 @@ where
   type Item = &'vec mut T;
   type IntoIter = IterMut<'vec, T>;
 
+  /// See `IntoIterator::into_iter()`.
   fn into_iter(self) -> Self::IntoIter {
     self.iter_mut()
   }

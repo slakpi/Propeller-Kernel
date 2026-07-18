@@ -1,7 +1,7 @@
 //! Core Configuration Utilities
 
-use crate::support::{hash, hash_map};
 use crate::arch::{self, cpu};
+use crate::support::{hash, hash_map};
 use crate::task::Task;
 
 /// 32-bit builds are limited to 16 cores. Thread-local page mapping requires
@@ -79,11 +79,11 @@ impl Core {
   pub fn get_release_addr(&self) -> usize {
     self.release_addr
   }
-  
+
   /// Release the core using its enable method.
-  /// 
+  ///
   /// # Parameters
-  /// 
+  ///
   /// * `start_addr` - The address at which the core should start.
   pub fn release(&self, start_addr: usize) {
     match self.enable_method {
@@ -92,7 +92,7 @@ impl Core {
       _ => panic!("Invalid enable method."),
     }
   }
-  
+
   /// Release the core using a spin table.
   ///
   /// # Parameters
@@ -105,14 +105,16 @@ impl Core {
     let phys_page = self.release_addr & arch::get_page_mask();
     let offset = self.release_addr - phys_page;
     let ptr = (task.map_page(phys_page) + offset) as *mut usize;
-    
-    unsafe { *ptr = start_addr; }
+
+    unsafe {
+      *ptr = start_addr;
+    }
     cpu::flush_data_cache_by_va(ptr as usize);
     cpu::send_event();
-    
+
     task.unmap_page();
   }
-  
+
   fn release_via_bcm2836(&self, start_addr: usize) {
     todo!()
   }
