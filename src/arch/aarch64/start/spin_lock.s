@@ -51,7 +51,7 @@ sync_spin_try_lock:
 
 
 /*----------------------------------------------------------------------------*/
-/// Release a spin lock. See K13.3.2.
+/// Release a spin lock. See K13.3.4.
 ///
 /// # Parameters
 ///
@@ -60,7 +60,11 @@ sync_spin_try_lock:
 /// # Description
 ///
 ///   NOTE: The caller must ensure it has acquired the lock.
+///
+///   NOTE: The example spin lock in K13.3.4 is missing the DSB and SEV.
 .global sync_spin_unlock
 sync_spin_unlock:
   stlr    wzr, [x0]         // Release the lock.
+  dsb     sy                // Ensure the write completes.
+  sev                       // Signal the other cores.
   ret
