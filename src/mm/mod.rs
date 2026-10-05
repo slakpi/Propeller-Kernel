@@ -53,9 +53,9 @@ pub fn init() {
     INITIALIZED = true;
   }
 
-  init_allocators();
+  debug_print!("mm init...\n");
 
-  debug_print!("mm init complete.\n");
+  init_allocators();
 }
 
 /// Get the global allocator for a memory zone.
@@ -65,10 +65,10 @@ pub fn init() {
 /// * `zone` - The memory zone.
 pub fn get_zone_allocator(
   zone: MemoryZone,
-) -> &'static mut Option<SpinLock<BuddyPageAllocator<'static>>> {
+) -> &'static Option<SpinLock<BuddyPageAllocator<'static>>> {
   let index = get_zone_index(zone).unwrap();
-  let allocators = unsafe { ptr::addr_of_mut!(ZONE_ALLOCATORS).as_mut().unwrap() };
-  &mut allocators[index]
+  let allocators = unsafe { ptr::addr_of!(ZONE_ALLOCATORS).as_ref().unwrap() };
+  &allocators[index]
 }
 
 /// Initialize the allocators.
@@ -122,10 +122,10 @@ fn init_allocators() {
       .unwrap(),
     ));
 
-    debug_print!("Zone {} allocator:\n", zone.zone_index);
-    debug_print!(" Metadata @ {:#x}\n", curr_meta_base);
+    debug_print!(" Zone {} allocator:\n", zone.zone_index);
+    debug_print!("  Metadata @ {:#x}\n", curr_meta_base);
     for range in &alloc_config.get_ranges()[zone.start_index..=zone.end_index] {
-      debug_print!(" Block: {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
+      debug_print!("  Block: {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
     }
 
     curr_meta_base += zone.meta_size;
@@ -247,8 +247,8 @@ fn get_zone_index(zone: MemoryZone) -> Option<usize> {
 #[cfg(feature = "module_tests")]
 pub fn run_tests() {
   let mut context = crate::test::TestContext::new();
-  debug_print!(" mm:\n");
+  debug_print!("mm:\n");
   page_allocator::run_tests(&mut context);
   slab_allocator::run_tests(&mut context);
-  debug_print!("  {} pass, {} fail\n", context.pass_count, context.fail_count);
+  debug_print!(" {} pass, {} fail\n", context.pass_count, context.fail_count);
 }

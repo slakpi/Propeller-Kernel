@@ -55,6 +55,8 @@
 // assumed and the MMU will read directly from memory. Configure the MMU to
 // expect normal write-back, write-allocate for both the inner and outer
 // regions in TTBR1_EL1 and TTBR0_EL1.
+//
+// Allow inner cache sharing of table traversal.
 .equ TCR_EL1_T0SZ,   16
 .equ TCR_EL1_T1SZ,   (TCR_EL1_T0SZ << 16)
 .equ TCR_EL1_TG0_4K, (0 << 14)
@@ -63,7 +65,9 @@
 .equ TCR_EL1_IRGN0,  (0b01 << 8)
 .equ TCR_EL1_ORGN1,  (0b01 << 26)
 .equ TCR_EL1_ORGN0,  (0b01 << 10)
-.equ TCR_EL1_CACHE,  (TCR_EL1_IRGN1 | TCR_EL1_IRGN0 | TCR_EL1_ORGN1 | TCR_EL1_ORGN0)
+.equ TCR_EL1_SH1,    (0b11 << 28)
+.equ TCR_EL1_SH0,    (0b11 << 12)
+.equ TCR_EL1_CACHE,  (TCR_EL1_IRGN1 | TCR_EL1_IRGN0 | TCR_EL1_ORGN1 | TCR_EL1_ORGN0 | TCR_EL1_SH1 | TCR_EL1_SH0)
 .equ TCR_EL1_VALUE,  (TCR_EL1_T0SZ | TCR_EL1_T1SZ | TCR_EL1_TG0_4K | TCR_EL1_TG1_4K | TCR_EL1_CACHE)
 
 // EL1 memory attribute indirection register configuration. See D17.2.97.
@@ -87,10 +91,10 @@
 // Mark normal memory as inner shareable. See B2.7.1. Inner shareable ensures
 // coherency within the inner shareable domain. Per D8.5.2, this applies when
 // TCR_ELx.DS is 0.
-.equ MT_NORMAL_SH_INNER,     0x3
+.equ MT_NORMAL_SH_INNER, (0b11 << 8)
 
-.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | (MT_NORMAL_SH_INNER << 8) | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | (MT_NORMAL_SH_INNER << 8) | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | MT_NORMAL_SH_INNER | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | MT_NORMAL_SH_INNER | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RO_FLAGS, (MM_ACCESS_RO | (MT_DEVICE_nGnRnE_IDX << 2) | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RW_FLAGS, (MM_ACCESS_RW | (MT_DEVICE_nGnRnE_IDX << 2) | MM_ACCESS_FLAG)
 
@@ -210,11 +214,9 @@ skip_dtb_mapping:
 ///
 /// # Assumptions
 ///
-/// Assumes the stack will not require multiple L4 tables.
-///
-/// Assumes the MMU is enabled.
-///
-/// Assumes that the stack is initially empty on entry.
+/// * The stack will not require multiple L4 tables.
+/// * The MMU is enabled.
+/// * That the stack is initially empty on entry.
 .global mmu_setup_primary_core_stack
 mmu_setup_primary_core_stack:
 // x9 - Current table address

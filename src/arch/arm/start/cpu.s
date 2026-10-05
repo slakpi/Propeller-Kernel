@@ -25,3 +25,25 @@ cpu_get_id:
   ldr     r1, =CPU_AFFINITY_MASK
   and     r0, r0, r1
   mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Clean and invalidate the data cache by virtual address.
+///
+/// # Parameters
+///
+/// * r0 - The virtual address to invalidate.
+.global cpu_flush_data_cache_by_va
+cpu_flush_data_cache_by_va:
+  mcr     p15, 0, r0, c7, c14, 1
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Signal all cores.
+.global cpu_send_event
+cpu_send_event:
+  sev
+  mov     pc, lr

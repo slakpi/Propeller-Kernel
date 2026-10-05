@@ -7,6 +7,7 @@ use crate::support::memory::{
   MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone, PageAllocator,
 };
 use crate::support::{bits, device_tree, dtb};
+use crate::sync::SpinLock;
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -142,7 +143,8 @@ pub fn init(config_addr: usize) {
   init_serial_debug_output(kconfig.virtual_base, kconfig.kernel_pages_start, &mut allocator);
 
   debug_print!("\n\n=== Propeller (AArch64) ===\n");
-  debug_print!("Booting on core {:x}.\n", cpu::get_id());
+  debug_print!("Booting on core {:x}...\n", cpu::get_id());
+  debug_print!("arch init...\n");
 
   // Require 4 KiB pages.
   assert_eq!(kconfig.page_size, PAGE_SIZE);
@@ -161,8 +163,6 @@ pub fn init(config_addr: usize) {
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map(&mut allocator);
-
-  debug_print!("arch init complete.\n");
 }
 
 /// Initialize symmetric multiprocessing.
@@ -170,23 +170,21 @@ pub fn init(config_addr: usize) {
 /// # Parameters
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
-pub fn init_smp(allocator: &mut impl PageAllocator) {
-  let config = get_device_tree().get_core_config();
+pub fn init_smp(allocator: &SpinLock<impl PageAllocator>) {
+  let core_config = get_device_tree().get_core_config();
 
   // If the system only has a single core, it is already set up. There is no
   // need to do anything else.
-  if config.get_core_count() < 2 {
+  if core_config.get_core_count() < 2 {
     return;
   }
 
   debug_print!("--- SMP Initialization ---\n");
-  init_isr_stacks(allocator);
+  init_isr_stacks(allocator.lock().as_mut());
 
   debug_print!("Releasing secondary cores...\n");
   let start_addr = _secondary_start as *const () as usize - get_kernel_virtual_base();
-  for core in config.get_cores().iter().skip(1) {
-    core.release(start_addr);
-  }
+  core_config.release(start_addr);
 }
 
 /// Get the size of a page.
@@ -341,12 +339,19 @@ fn init_serial_debug_output(
 ) {
   let range = debug::get_physical_range();
 
+  assert!(bits::is_aligned(range.0, get_page_size()));
+
+  let size = range.1 << get_page_shift();
+  if size == 0 {
+    return;
+  }
+
   mm::map_memory(
     virt_base,
     pages_start,
     virt_base + range.0,
     range.0,
-    range.1,
+    size,
     true,
     allocator,
     MappingStrategy::Granular,
@@ -370,9 +375,14 @@ fn init_core_config(blob_vaddr: usize) {
 
   assert!(dtb_cpu::get_core_config(core_config, blob_vaddr));
 
+  // Set the global enable method to None. DeviceTrees for 64-bit systems should
+  // specify the enable method on each core.
+  core_config.set_enable_method(None);
+
+  debug_print!(" Cores:\n");
   for core in core_config.get_cores() {
-    let s = core::str::from_utf8(&core.get_core_type()).unwrap_or("Unknown");
-    debug_print!("Core {:x}: {}\n", core.get_id(), s)
+    let s = core::str::from_utf8(&core.core_type).unwrap_or("Unknown");
+    debug_print!("  {:x}: {}\n", core.id, s)
   }
 }
 
@@ -393,7 +403,7 @@ fn init_core_config(blob_vaddr: usize) {
 /// # Assumptions
 ///
 /// Assumes the system is configured correctly and that there will not be any
-/// overflow when calculating end of the kernel or blob..
+/// overflow when calculating end of the kernel or blob.
 fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let device_tree = unsafe { ptr::addr_of_mut!(DEVICE_TREE).as_mut().unwrap() };
 
@@ -438,8 +448,9 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
     mem_config.exclude_range(range);
   }
 
+  debug_print!(" Memory:\n");
   for range in mem_config.get_ranges() {
-    debug_print!("Memory: {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
+    debug_print!("  {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
   }
 }
 
@@ -458,6 +469,7 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
   let mem_config = get_device_tree().get_memory_config();
 
   // Linearly map each memory range using 2 MiB sections.
+  debug_print!(" Linear Kernel Memory Mappings:\n");
   for range in mem_config.get_ranges() {
     mm::direct_map_memory(
       kconfig.virtual_base,
@@ -470,7 +482,7 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
     );
 
     debug_print!(
-      "Map: {:#x} - {:#x} => {:#x}\n",
+      "  {:#x} - {:#x} => {:#x}\n",
       range.base,
       range.base + range.size - 1,
       kconfig.virtual_base + range.base
@@ -495,6 +507,7 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
 ///
 /// Assumes multiple cores.
 fn init_isr_stacks(allocator: &mut impl PageAllocator) {
+  // Each entry has the core index and corresponding stack address.
   const ENTRY_LEN: usize = 2;
 
   let kconfig = get_kernel_config();
@@ -524,7 +537,7 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
     // Calculate the virtual base address for the stack and update the stack
     // list with the core ID and stack start address.
     let stack_vbase = stack_area_base + (step_size * (index - 1)) + (1 << page_shift);
-    table[entry_index] = core.get_id();
+    table[entry_index] = core.id;
     table[entry_index + 1] = stack_vbase + stack_size;
 
     // Map the core's stack into the ISR stack area.

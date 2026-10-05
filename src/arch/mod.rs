@@ -5,6 +5,7 @@ pub mod bits;
 pub mod cpu;
 pub mod debug;
 pub mod interrupts;
+pub mod io;
 pub mod sync;
 pub mod task;
 
@@ -23,6 +24,7 @@ mod arm_common;
 
 use crate::support::device_tree;
 use crate::support::memory::PageAllocator;
+use crate::sync::SpinLock;
 use core::ptr;
 
 // Reimport the architecture module with a consistent name.
@@ -46,7 +48,7 @@ pub fn init(config_addr: usize) {
 /// # Parameters
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
-pub fn init_smp(allocator: &mut impl PageAllocator) {
+pub fn init_smp(allocator: &SpinLock<impl PageAllocator>) {
   intf::init::init_smp(allocator);
 }
 

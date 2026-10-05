@@ -15,6 +15,8 @@
 // assumed and the MMU will read directly from memory. Configure the MMU to
 // expect normal write-back, write-allocate for both the inner and outer
 // regions in TTBR1 and TTBR0.
+//
+// Allow inner cache sharing of table traversal.
 .equ TTBCR_EAE,    (0x1 << 31)
 .equ TTBCR_A1,     (0x0 << 22)
 .equ TTBCR_T1SZ_2, (0x1 << 16)
@@ -24,7 +26,9 @@
 .equ TTBCR_IRGN0,  (0b01 << 8)
 .equ TTBCR_ORGN1,  (0b01 << 26)
 .equ TTBCR_ORGN0,  (0b01 << 10)
-.equ TTBCR_CACHE,  (TTBCR_IRGN1 | TTBCR_IRGN0 | TTBCR_ORGN1 | TTBCR_ORGN0)
+.equ TTBCR_SH1,    (0b11 << 28)
+.equ TTBCR_SH0,    (0b11 << 12)
+.equ TTBCR_CACHE,  (TTBCR_IRGN1 | TTBCR_IRGN0 | TTBCR_ORGN1 | TTBCR_ORGN0 | TTBCR_SH1 | TTBCR_SH0)
 .equ TTBCR_VALUE,  (TTBCR_EAE | TTBCR_A1 | TTBCR_T0SZ | TTBCR_CACHE)
 
 // SCTLR flags. See B4.1.130. Enable the MMU, expect exception vectors at the
@@ -62,8 +66,12 @@
 .equ MAIR0_VALUE,     ((MT_DEVICE_ATTR << MT_DEVICE_SHIFT) | (MT_NORMAL_ATTR << MT_NORMAL_SHIFT))
 .equ MAIR1_VALUE,     0
 
-.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
-.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | MM_ACCESS_FLAG)
+// Mark normal memory as inner shareable to ensure coherency within the inner
+// shareable domain.
+.equ MT_NORMAL_SH_INNER, (0b11 << 8)
+
+.equ MMU_NORMAL_RO_FLAGS, (MM_ACCESS_RO | (MT_NORMAL_IDX << 2) | MT_NORMAL_SH_INNER | MM_ACCESS_FLAG)
+.equ MMU_NORMAL_RW_FLAGS, (MM_ACCESS_RW | (MT_NORMAL_IDX << 2) | MT_NORMAL_SH_INNER | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RO_FLAGS, (MM_ACCESS_RO | (MT_DEVICE_IDX << 2) | MM_ACCESS_FLAG)
 .equ MMU_DEVICE_RW_FLAGS, (MM_ACCESS_RW | (MT_DEVICE_IDX << 2) | MM_ACCESS_FLAG)
 
@@ -143,9 +151,6 @@ mmu_create_kernel_page_tables:
   mov     r0, #0
   bl      section_align_block
   mov     r5, r1
-
-// Initialize the indirect memory attributes
-  bl      init_mair
 
 // Clear the kernel page tables; save the start address.
   bl      layout_get_physical_pages_start
@@ -232,12 +237,6 @@ mmu_create_kernel_page_tables:
   mov     r9, r0            // Save the lower L2 table address
   mov     r10, r1           // Save the upper L2 table address
 
-// Map the vectors into the kernel identity page tables.
-  bl      layout_get_physical_exception_vectors_start
-  mov     r1, r0
-  mov     r0, r10
-  bl      map_vectors
-
 // Map the kernel area as RW normal memory. See above.
   mov     r0, r9
   mov     r1, #0
@@ -294,13 +293,10 @@ mmu_create_kernel_page_tables:
 ///
 /// # Assumptions
 ///
-/// Assumes the stack will not require multiple L3 tables.
-///
-/// Assumes the MMU is enabled and the identity tables are still configured.
-///
-/// Assumes the caller is in SVC.
-///
-/// Assumes that the stack is initially empty on entry.
+/// * The stack will not require multiple L3 tables.
+/// * The MMU is enabled and the identity tables are still configured.
+/// * The caller is in SVC.
+/// * That the stack is initially empty on entry.
 .global mmu_setup_primary_core_stacks
 mmu_setup_primary_core_stacks:
 // r2 - Temp
@@ -341,7 +337,7 @@ mmu_setup_primary_core_stacks:
 // Preserve the virtual stack start in the frame pointer.
   mov     fp, r0
 
-// Calculate the base of the FIQ stack.
+// Calculate the virtual base of the FIQ stack.
   mov     r10, r7
   add     r10, r10, r9      // Size with guard page
   mov     r2, #5
@@ -373,10 +369,9 @@ mmu_setup_primary_core_stacks:
   add     r4, r8, lsl #3
 
 // Get the physical base of the FIQ stack.
-  ldr     r6, =__kernel_svc_stack_start
+  ldr     r6, =__kernel_fiq_stack_end
   ldr     r10, =__virtual_start
   sub     r6, r6, r10
-  sub     r6, r7, lsl #2
 
 // Set up the page entries.
   mov     r10, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_PAGE)
@@ -415,6 +410,11 @@ mmu_setup_primary_core_stacks:
 ///
 /// Set the MMU flags and enable the MMU.
 ///
+/// # Parameters
+///
+/// * r0 - The base physical address of the identity page tables.
+/// * r1 - The base physical address of the page tables.
+///
 /// # Description
 ///
 ///   NOTE: The function must be called with the link register set to the
@@ -425,17 +425,40 @@ mmu_setup_primary_core_stacks:
 ///         other functions.
 .global mmu_setup_and_enable
 mmu_setup_and_enable:
-  mov     r2, lr
+// Set MAIR0 and MAIR1.
+  ldr     r2, =MAIR0_VALUE
+  mcr     p15, 0, r2, c10, c2, 0
 
-  bl      setup_ttbr
+  ldr     r2, =MAIR1_VALUE
+  mcr     p15, 0, r2, c10, c2, 1
 
-  ldr     r0, =__vmsplit
-  bl      make_ttbcr_value
+// Set TTBR1 to the kernel pages and TTBR0 to the identity pages.
+  mov     r2, #0
+  mcrr    p15, 1, r1, r2, c2
+  mcrr    p15, 0, r0, r2, c2
+
+// Configure the bootstrap TTBCR value. If the split value is 3, a 3/1 split is
+// used. Otherwise, a 2/2 split is used.
+  ldr     r1, =__vmsplit
+  ldr     r0, =TTBCR_VALUE
+
+  cmp     r1, #3
+  bne     1f
+
+  orr     r0, #TTBCR_T1SZ_3
+  b       2f
+
+1:
+  orr     r0, #TTBCR_T1SZ_2
+
+2:
   mcr     p15, 0, r0, c2, c0, 2
 
+// Set the DACR value.
   ldr     r0, =DACR_VALUE
   mcr     p15, 0, r0, c3, c0, 0
 
+// Enable the MMU.
   isb
   mrc     p15, 0, r0, c1, c0, 0
   ldr     r1, =SCTLR_FLAGS
@@ -443,7 +466,7 @@ mmu_setup_and_enable:
   mcr     p15, 0, r0, c1, c0, 0
   isb
 
-  mov     pc, r2
+  mov     pc, lr
 
 
 ///-----------------------------------------------------------------------------
@@ -497,6 +520,38 @@ mmu_update_table_entry_local:
 // in B3.18.7 and BPIMVA in B3.18.6), and ensure completion.
   mcr     p15, 0, r1, c8, c7, 1
   mcr     p15, 0, r1, c7, c5, 7
+  dsb
+  isb
+
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the TLB by virtual address.
+///
+/// # Parameters
+///
+/// * r0 - The base virtual address to invalidate.
+.global mmu_invalidate_tlb_by_va
+mmu_invalidate_tlb_by_va:
+  mcr     p15, 0, r0, c8, c7, 1
+  dsb
+  isb
+
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the branch predictors by virtual address.
+///
+/// # Parameters
+///
+/// * r0 - The base virtual address to invalidate.
+.global mmu_invalidate_bp_by_va
+mmu_invalidate_bp_by_va:
+  mcr     p15, 0, r0, c7, c5, 7
   dsb
   isb
 
@@ -595,19 +650,6 @@ map_vectors:
 
 ///-----------------------------------------------------------------------------
 ///
-/// Initialize the indirect memory attribute registers.
-init_mair:
-  ldr     r0, =MAIR0_VALUE
-  mcr     p15, 0, r0, c10, c2, 0
-
-  ldr     r0, =MAIR1_VALUE
-  mcr     p15, 0, r0, c10, c2, 1
-
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
 /// Initialize the L1 table.
 ///
 /// # Parameters
@@ -700,56 +742,4 @@ map_block:
 
   pop     {r4, r5}
 
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// Setup the TTBCR flags for the MMU.
-///
-/// * r0 - The virtual memory split.
-///
-/// # Returns
-///
-/// Configures the bootstrap TTBCR value. If the split value is 3, a 3/1 split
-/// is used. Otherwise, a 2/2 split is used.
-make_ttbcr_value:
-  ldr     r1, =TTBCR_VALUE
-
-  cmp     r0, #3
-  bne     1f
-
-  orr     r1, #TTBCR_T1SZ_3
-  b       2f
-
-1:
-  orr     r1, #TTBCR_T1SZ_2
-
-2:
-  mov     r0, r1
-
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// Setup the translation table registers before enabling the MMU.
-///
-/// # Description
-///
-/// Sets up TTBR0 with the identity tables and TTBR1 with the kernel tables.
-setup_ttbr:
-  fn_entry
-
-// Set TTBR1 to the kernel pages.
-  bl      layout_get_physical_pages_start
-  mov     r1, #0
-  mcrr    p15, 1, r0, r1, c2
-
-// Set TTBR0 to the identity pages.
-  bl      layout_get_physical_id_pages_start
-  mov     r1, #0
-  mcrr    p15, 0, r0, r1, c2
-
-  fn_exit
   mov     pc, lr

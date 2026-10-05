@@ -1,7 +1,7 @@
 //! Core Configuration Utilities
 
-use crate::arch::{self, cpu};
-use crate::support::{hash, hash_map};
+use crate::arch::{self, cpu, io};
+use crate::support::{bits, hash, hash_map};
 use crate::task::Task;
 
 /// 32-bit builds are limited to 16 cores. Thread-local page mapping requires
@@ -25,8 +25,6 @@ pub const CORE_MAP_SIZE: usize = 29;
 /// Method used to enable a core.
 #[derive(Copy, Clone)]
 pub enum CoreEnableMethod {
-  /// Default invalid method.
-  Invalid,
   /// Spin tables park each core in a loop watching a specific memory address. A
   /// core is enabled by writing the kernel start address to the watch address.
   /// The memory address is in CPU memory.
@@ -39,12 +37,10 @@ pub enum CoreEnableMethod {
 }
 
 /// Logical core information.
-///
-///   TODO: The members should be private.
 pub struct Core {
   pub id: usize,
   pub core_type: [u8; CORE_TYPE_LEN],
-  pub enable_method: CoreEnableMethod,
+  pub enable_method: Option<CoreEnableMethod>,
   pub release_addr: usize,
 }
 
@@ -54,30 +50,9 @@ impl Core {
     Self {
       id: 0,
       core_type: [0; CORE_TYPE_LEN],
-      enable_method: CoreEnableMethod::Invalid,
+      enable_method: None,
       release_addr: 0,
     }
-  }
-
-  /// Get the core's ID.
-  pub fn get_id(&self) -> usize {
-    self.id
-  }
-
-  /// Get the core type byte string.
-  pub fn get_core_type(&self) -> &[u8] {
-    &self.core_type
-  }
-
-  /// Get the method to enable the core.
-  pub fn get_enable_method(&self) -> CoreEnableMethod {
-    self.enable_method
-  }
-
-  /// Get the address used for any of the enable methods that spin on an
-  /// address.
-  pub fn get_release_addr(&self) -> usize {
-    self.release_addr
   }
 
   /// Release the core using its enable method.
@@ -85,11 +60,24 @@ impl Core {
   /// # Parameters
   ///
   /// * `start_addr` - The address at which the core should start.
-  pub fn release(&self, start_addr: usize) {
-    match self.enable_method {
+  /// * `enable_method` - The enable method to use.
+  ///
+  /// # Description
+  ///
+  /// If the enable method is None, the enable methods specified by the core
+  /// will be used.
+  fn release(&self, start_addr: usize, enable_method: Option<CoreEnableMethod>) {
+    let enable_method = if let Some(enable_method) = enable_method {
+      enable_method
+    } else if let Some(enable_method) = self.enable_method {
+      enable_method
+    } else {
+      panic!("Invalid enable method.");
+    };
+
+    match enable_method {
       CoreEnableMethod::SpinTable => self.release_via_spin_table(start_addr),
       CoreEnableMethod::Bcm2836 => self.release_via_bcm2836(start_addr),
-      _ => panic!("Invalid enable method."),
     }
   }
 
@@ -102,7 +90,7 @@ impl Core {
     // The release address is in physical memory, but not guaranteed to be
     // mapped linearly on all architectures.
     let task = Task::get_current_task_mut();
-    let phys_page = self.release_addr & arch::get_page_mask();
+    let phys_page = bits::align_down(self.release_addr, arch::get_page_size());
     let offset = self.release_addr - phys_page;
     let ptr = (task.map_page(phys_page) + offset) as *mut usize;
 
@@ -115,8 +103,30 @@ impl Core {
     task.unmap_page();
   }
 
+  /// Release the core using the BCM2836 mailboxes.
+  ///
+  /// # Parameters
+  ///
+  /// * `start_addr` - The address at which the core should start.
   fn release_via_bcm2836(&self, start_addr: usize) {
-    todo!()
+    // TODO: Need to get the physical base address from the device tree.
+    const BCM2836_PHYS_ADDR: usize = 0x4000_0000;
+    const OFFSETS: [usize; 4] = [0x8c, 0x9c, 0xac, 0xbc];
+
+    // The BCM2836 only has four cores and the lower two bits of their
+    // identifiers need to be set to correspond to the mailbox numbers.
+    let index = self.id & 0x3;
+    let Some(virt_addr) = io::map_io(BCM2836_PHYS_ADDR, 1) else {
+      return;
+    };
+    let ptr = (virt_addr + OFFSETS[index]) as *mut usize;
+
+    unsafe {
+      *ptr = start_addr;
+    }
+    cpu::send_event();
+
+    io::unmap_io(virt_addr);
   }
 }
 
@@ -128,9 +138,11 @@ pub struct CoreConfig {
   cores: [Core; MAX_CORES],
   core_count: usize,
   id_map: IdMap,
+  enable_method: Option<CoreEnableMethod>,
 }
 
 impl CoreConfig {
+  /// Convenience initializer for the core array.
   const CORE_INITIALIZER: Core = Core::new();
 
   /// Construct a new core configuration.
@@ -139,6 +151,7 @@ impl CoreConfig {
       cores: [Self::CORE_INITIALIZER; MAX_CORES],
       core_count: 0,
       id_map: IdMap::new(hash::BuildFnv1aHasher {}),
+      enable_method: None,
     }
   }
 
@@ -175,15 +188,46 @@ impl CoreConfig {
     true
   }
 
+  /// Set the common core enable method.
+  ///
+  /// # Parameters
+  ///
+  /// * `enable_method` - The enable method to be used for all cores.
+  pub fn set_enable_method(&mut self, enable_method: Option<CoreEnableMethod>) {
+    self.enable_method = enable_method;
+  }
+
+  /// Release all secondary cores.
+  ///
+  /// # Parameters
+  ///
+  /// * `start_addr` - The address at which the core should start.
+  ///
+  /// # Description
+  ///
+  /// Uses the appropriate method to release all secondary cores to the provided
+  /// start address. The primary core is assumed to be core 0 and is skipped.
+  pub fn release(&self, start_addr: usize) {
+    for core in &self.cores[1..self.core_count] {
+      core.release(start_addr, self.enable_method);
+    }
+  }
+
   /// Reset the configuration.
   pub fn reset(&mut self) {
     self.id_map.clear();
     self.core_count = 0;
+    self.enable_method = None;
   }
 
   /// Get the number of logical cores available.
   pub fn get_core_count(&self) -> usize {
     self.core_count
+  }
+
+  /// Get the list of cores.
+  pub fn get_cores(&self) -> &[Core] {
+    &self.cores[..self.core_count]
   }
 
   /// Get the core index from a physical core identifier.
@@ -243,10 +287,5 @@ impl CoreConfig {
 
     let id = self.id_map.find(id)?;
     Some(*id)
-  }
-
-  /// Get the list of cores.
-  pub fn get_cores(&self) -> &[Core] {
-    &self.cores[..self.core_count]
   }
 }

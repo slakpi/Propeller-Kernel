@@ -1,5 +1,7 @@
 //! Range Utilities
 
+use crate::support::bits;
+
 /// Range ordering.
 pub enum RangeOrdering {
   /// The LHS is fully to the left of the RHS.
@@ -33,6 +35,92 @@ impl<TagType> Range<TagType>
 where
   TagType: Copy,
 {
+  /// Construct a new tagged range.
+  ///
+  /// # Parameters
+  ///
+  /// * `tag` - A descriptor tag for the range.
+  /// * `base` - The base value of the range.
+  /// * `size` - The size of the range.
+  pub const fn new_tagged(tag: TagType, base: usize, size: usize) -> Self {
+    Self { tag, base, size }
+  }
+
+  /// Determines if the range is valid.
+  ///
+  /// # Returns
+  ///
+  /// True if the size is greater than zero and the end of the range does not
+  /// overflow.
+  pub fn is_valid(&self) -> bool {
+    if self.size == 0 {
+      return false;
+    }
+
+    if usize::MAX - self.size + 1 < self.base {
+      return false;
+    }
+
+    true
+  }
+
+  /// Align the range to a boundary by expanding it.
+  ///
+  /// # Parameters
+  ///
+  /// * `boundary` - The alignment boundary.
+  ///
+  /// # Returns
+  ///
+  /// The expanded range or None if the range is not valid.
+  pub fn align_by_expanding(&self, boundary: usize) -> Option<Range<TagType>> {
+    if !self.is_valid() {
+      return None;
+    }
+
+    let base = bits::align_down(self.base, boundary);
+
+    Some(Range {
+      tag: self.tag,
+      base,
+      size: bits::align_up(self.size + (self.base - base), boundary),
+    })
+  }
+
+  /// Align the range to a boundary by contracting it.
+  ///
+  /// # Parameters
+  ///
+  /// * `boundary` - The alignment boundary.
+  ///
+  /// # Returns
+  ///
+  /// The contracted range or None if the range is invalid or could not be
+  /// contracted.
+  pub fn align_by_contracting(&self, boundary: usize) -> Option<Range<TagType>> {
+    if !self.is_valid() {
+      return None;
+    }
+
+    // If the range is smaller than the boundary, it cannot be contracted.
+    if self.size < boundary {
+      return None;
+    }
+
+    let base = bits::align_up(self.base, boundary);
+    let size = bits::align_down(self.size - (base - self.base), boundary);
+
+    if size == 0 {
+      return None;
+    }
+
+    Some(Range {
+      tag: self.tag,
+      base,
+      size,
+    })
+  }
+
   /// Compare two ranges.
   ///
   /// # Parameters
@@ -41,9 +129,9 @@ where
   ///
   /// # Returns
   ///
-  /// A range ordering or None if the either range is invalid.
+  /// A range ordering or None if either range is invalid.
   pub fn cmp(&self, rhs: &Self) -> Option<RangeOrdering> {
-    if self.size == 0 || rhs.size == 0 {
+    if !self.is_valid() || !rhs.is_valid() {
       return None;
     }
 
@@ -198,13 +286,13 @@ where
   ///   is the low part of the range, `[base, at)`, and the second element is
   ///   the high part of the range, `[at, end)`.
   ///
-  /// * If the size of the range is zero, returns an Error.
+  /// * If the range is invalid, returns an Error.
   ///
   /// # Returns
   ///
   /// A tuple with the resulting range(s) of the split. See description.
   pub fn split(&self, at: usize) -> Result<(Option<Self>, Option<Self>), ()> {
-    if self.size == 0 {
+    if !self.is_valid() {
       return Err(());
     }
 
@@ -228,5 +316,21 @@ where
         size: my_end - at + 1,
       }),
     ))
+  }
+}
+
+impl Range<()> {
+  /// Construct a new untagged range.
+  ///
+  /// # Parameters
+  ///
+  /// * `base` - The base value of the range.
+  /// * `size` - The size of the range.
+  pub const fn new_untagged(base: usize, size: usize) -> Self {
+    Self {
+      tag: (),
+      base,
+      size,
+    }
   }
 }

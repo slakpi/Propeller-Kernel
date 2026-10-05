@@ -226,7 +226,7 @@ impl<'meta> BuddyPageAllocator<'meta> {
   /// A mutable node reference assumed to be uninitialized.
   fn get_block_node_unchecked_mut(addr: usize) -> &'meta mut BlockNode {
     let page_size = arch::get_page_size();
-    assert_eq!(bits::align_down(addr, page_size), addr);
+    assert!(bits::is_aligned(addr, page_size));
 
     let page = Task::get_current_task_mut().map_page(addr);
     unsafe { (page as *mut BlockNode).as_mut().unwrap() }

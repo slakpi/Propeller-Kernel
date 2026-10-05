@@ -21,7 +21,7 @@ mod tests;
 
 use crate::arch;
 use crate::support::memory::PageAllocator;
-use crate::sync::spin_lock::SpinLock;
+use crate::sync::SpinLock;
 use core::ops::{Index, IndexMut};
 use core::ptr::{self, NonNull};
 use core::slice::{Iter, IterMut};

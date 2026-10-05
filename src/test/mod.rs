@@ -21,7 +21,7 @@ impl TestContext {
 #[macro_export]
 macro_rules! test_module {
   ($mod:ident) => {
-    debug_print!("  {}\n", stringify!($mod));
+    debug_print!(" {}\n", stringify!($mod));
   };
 }
 
@@ -37,7 +37,7 @@ macro_rules! check {
   ($ctx:ident, $act:expr) => {
     if !$act {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: condition is false ({} {})\n", file!(), line!());
+      debug_print!("  FAIL: condition is false ({} {})\n", file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -49,7 +49,7 @@ macro_rules! check_eq {
   ($ctx:ident, $act:expr, $exp:expr) => {
     if $act != $exp {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} != {} ({} {})\n", $act, $exp, file!(), line!());
+      debug_print!("  FAIL: {} != {} ({} {})\n", $act, $exp, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -61,7 +61,7 @@ macro_rules! check_neq {
   ($ctx:ident, $act:expr, $exp:expr) => {
     if $act == $exp {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} == {} ({} {})\n", $act, $exp, file!(), line!());
+      debug_print!("  FAIL: {} == {} ({} {})\n", $act, $exp, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -73,7 +73,7 @@ macro_rules! check_lt {
   ($ctx:ident, $act:expr, $exp:expr) => {
     if $act >= $exp {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} >= {} ({} {})\n", $act, $exp, file!(), line!());
+      debug_print!("  FAIL: {} >= {} ({} {})\n", $act, $exp, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -85,7 +85,7 @@ macro_rules! check_lteq {
   ($ctx:ident, $act:expr, $exp:expr) => {
     if $act > $exp {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} > {} ({} {})\n", $act, $exp, file!(), line!());
+      debug_print!("  FAIL: {} > {} ({} {})\n", $act, $exp, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -97,7 +97,7 @@ macro_rules! check_gt {
   ($ctx:ident, $act:expr, $exp:expr) => {
     if $act <= $exp {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} <= {} ({} {})\n", $act, $exp, file!(), line!());
+      debug_print!("  FAIL: {} <= {} ({} {})\n", $act, $exp, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -109,7 +109,7 @@ macro_rules! check_gteq {
   ($ctx:ident, $act:expr, $exp:expr) => {
     if $act < $exp {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} < {} ({} {})\n", $act, $exp, file!(), line!());
+      debug_print!("  FAIL: {} < {} ({} {})\n", $act, $exp, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -121,7 +121,7 @@ macro_rules! check_not_none {
   ($ctx:ident, $act:expr) => {
     if $act.is_none() {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} is None ({} {})\n", stringify!($act), file!(), line!());
+      debug_print!("  FAIL: {} is None ({} {})\n", stringify!($act), file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -133,7 +133,7 @@ macro_rules! check_none {
   ($ctx:ident, $act:expr) => {
     if !$act.is_none() {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} is not None ({} {})\n", stringify!($act), file!(), line!());
+      debug_print!("  FAIL: {} is not None ({} {})\n", stringify!($act), file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -149,7 +149,7 @@ macro_rules! check_optional {
       $ctx.pass_count += 1;
     } else {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} != {} ({} {})\n", stringify!($act), $exp, file!(), line!());
+      debug_print!("  FAIL: {} != {} ({} {})\n", stringify!($act), $exp, file!(), line!());
     }
   };
 }
@@ -159,7 +159,7 @@ macro_rules! check_result {
   ($ctx:ident, $act:expr) => {
     if let Err(e) = $act {
       $ctx.fail_count += 1;
-      debug_print!("   FAIL: {} ({} {})\n", e, file!(), line!());
+      debug_print!("  FAIL: {} ({} {})\n", e, file!(), line!());
     } else {
       $ctx.pass_count += 1;
     }
@@ -170,6 +170,6 @@ macro_rules! check_result {
 macro_rules! mark_fail {
   ($ctx:ident, $msg:literal) => {
     $ctx.fail_count += 1;
-    debug_print!("   FAIL: {} ({} {})\n", $msg, file!(), line!());
+    debug_print!("  FAIL: {} ({} {})\n", $msg, file!(), line!());
   };
 }

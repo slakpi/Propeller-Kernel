@@ -39,6 +39,8 @@ SECTIONS
 
   .data.stacks : ALIGN(__page_size)
   {
+    __kernel_fiq_stack_end = .;
+
     . += (__kernel_stack_pages * __page_size);
     . += (__kernel_stack_pages * __page_size);
     . += (__kernel_stack_pages * __page_size);

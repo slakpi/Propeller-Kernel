@@ -163,6 +163,10 @@ primary_core_boot:
 //
 //   NOTE: Manually set the link register to the virtual return address when
 //         calling `setup_and_enable_mmu`. Do not use branch-and-link.
+  bl      layout_get_physical_pages_start
+  mov     r4, r0
+  bl      layout_get_physical_id_pages_start
+  mov     r1, r4
   ldr     lr, =primary_core_begin_virt_addressing
   b       mmu_setup_and_enable
 
@@ -276,7 +280,28 @@ secondary_hyp_entry:
 ///
 /// Boot a secondary core.
 secondary_core_boot:
-  b       cpu_halt
+// Setup the MMU and enable it.
+//
+//   NOTE: Manually set the link register to the virtual return address when
+//         calling `setup_and_enable_mmu`. Do not use branch-and-link.
+  bl      layout_get_physical_pages_start
+  mov     r4, r0
+  bl      layout_get_physical_id_pages_start
+  mov     r1, r4
+  ldr     lr, =secondary_core_begin_virt_addressing
+  b       mmu_setup_and_enable
+
+secondary_core_begin_virt_addressing:
+// Clean up the MMU setup now that the identity tables are not required.
+  bl      mmu_cleanup_ttbr
+
+// Finish setting up stacks.
+  bl      cpu_get_id        // Get the core ID and leave it in r0.
+  bl      setup_secondary_core_stacks
+
+  b       pk_scheduler
+
+// We will never return from the scheduler.
 
 
 ///-----------------------------------------------------------------------------
@@ -285,7 +310,7 @@ secondary_core_boot:
 ///
 /// # Description
 ///
-/// Writes the primary core's stack pointers to the stack list and updates the
+/// Writes the primary core's stack pointers to the stack list and assigns the
 /// stack pointer for each mode.
 ///
 ///   NOTE: See B9.3.12. Writing to CPSR_c enables writing to bits [7:0]. This
@@ -346,4 +371,87 @@ setup_stacks:
   msr     cpsr, r0
 
   fn_exit
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Set up the stacks for a secondary core.
+///
+/// # Parameters
+///
+/// * r0 - The core ID
+///
+/// # Description
+///
+/// Searches the stack list for the current core ID and assigns the stack
+/// pointer for each mode. If the current core ID is not found in the table, the
+/// function just halts the core.
+///
+///   NOTE: This function will be called by the secondary cores before they have
+///         stacks. This function MUST not modify callee-saved registers or call
+///         other functions.
+///
+///   NOTE: See B9.3.12. Writing to CPSR_c enables writing to bits [7:0]. This
+///         includes the masks for IRQ (7), FIQ (6), and Thumb execution (5).
+///         The core mode bits [4:0] are combined with 0b11000000 to ensure
+///         IRQ and FIQ remain masked and Thumb is not used.
+///
+/// # Assumptions
+///
+/// Assumes the core is in SVC mode.
+setup_secondary_core_stacks:
+// r0 - Core ID / CPSR state
+// r1 - Table address
+// r2 - Table bound
+// r3 - Temp
+
+// Find the core in the stack table. The stack list is a single page, so put a
+// bound on the loop for a single page. If the core is not found, just halt.
+  ldr     r1, =__kernel_stack_list
+  ldr     r2, =__page_size
+  add     r2, r1, r2
+
+1:
+  ldr     r3, [r1]          // Get the current stack record core ID
+  cmp     r3, r0            // Check the core ID
+  beq     2f                // Found the core!
+
+  add     r1, r1, #24       // Move to the next record
+  cmp     r1, r2            // Check if we have left the page
+  bge     cpu_halt          // Core not found, halt
+  b       1b                // Try the next record
+
+2:
+// Save off the CPSR
+  mrs     r0, cpsr
+
+// Move to the SVC entry and assign the stacks in reverse order since we are
+// already in SVC mode.
+  add     r1, r1, #20
+  ldr     sp, [r1]
+
+// Set the IRQ stack.
+  sub     r1, r1, #4
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_IRQ_MODE)
+  ldr     sp, [r1]
+
+// Set the ABT stack.
+  sub     r1, r1, #4
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_ABT_MODE)
+  ldr     sp, [r1]
+
+// Set the UND stack.
+  sub     r1, r1, #4
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_UND_MODE)
+  ldr     sp, [r1]
+
+// Set the FIQ stack.
+  sub     r1, r1, #4
+  msr     cpsr_c, #(MASK_FIQ_AND_IRQ | ARM_FIQ_MODE)
+  ldr     sp, [r1]
+
+// Reset CPSR.
+  msr     cpsr, r0
+
   mov     pc, lr

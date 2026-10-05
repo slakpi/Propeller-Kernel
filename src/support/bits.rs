@@ -37,15 +37,13 @@ pub const WORD_MASK: usize = WORD_BYTES - 1;
 ///
 /// # Assumptions
 ///
-/// `boundary` is assumed to be greater than 0. If 0, the subtraction will
-/// assert.
-///
 /// `boundary` is assumed to be a power of 2.
 ///
 /// # Returns
 ///
 /// The aligned address.
 pub const fn align_down(addr: usize, boundary: usize) -> usize {
+  assert!(is_power_of_2(boundary));
   addr & !(boundary - 1)
 }
 
@@ -58,15 +56,13 @@ pub const fn align_down(addr: usize, boundary: usize) -> usize {
 ///
 /// # Assumptions
 ///
-/// `boundary` is assumed to be greater than 0. If 0, the subtraction will
-/// assert.
-///
 /// `boundary` is assumed to be a power of 2.
 ///
 /// # Returns
 ///
 /// The aligned address.
 pub const fn align_up(addr: usize, boundary: usize) -> usize {
+  assert!(is_power_of_2(boundary));
   let b = boundary - 1;
   (addr + b) & !b
 }
@@ -80,15 +76,13 @@ pub const fn align_up(addr: usize, boundary: usize) -> usize {
 ///
 /// # Assumptions
 ///
-/// `boundary` is assumed to be greater than 0. If 0, the subtraction will
-/// assert.
-///
 /// `boundary` is assumed to be a power of 2.
 ///
 /// # Returns
 ///
 /// True if the address is aligned, false otherwise.
 pub const fn is_aligned(addr: usize, boundary: usize) -> bool {
+  assert!(is_power_of_2(boundary));
   addr & !(boundary - 1) == addr
 }
 

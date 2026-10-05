@@ -7,6 +7,7 @@
 #![cfg_attr(debug_assertions, allow(unused))]
 
 mod arch;
+mod io;
 mod mm;
 mod support;
 mod sync;
@@ -39,6 +40,7 @@ extern "C" fn pk_init(config: usize) {
   arch::init(config);
   task::init();
   mm::init();
+  io::init();
 
   // Run module tests single-threaded.
   #[cfg(feature = "module_tests")]
@@ -46,9 +48,9 @@ extern "C" fn pk_init(config: usize) {
 
   // Bring up any secondary cores.
   let alloc = mm::get_zone_allocator(MemoryZone::LinearMemoryZone)
-    .as_mut()
+    .as_ref()
     .unwrap();
-  arch::init_smp(alloc.lock().as_mut());
+  arch::init_smp(alloc);
 }
 
 /// Scheduler entry point.

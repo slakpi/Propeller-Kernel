@@ -6,6 +6,8 @@ use crate::support::memory::{MappingStrategy, PageAllocator};
 use core::{ptr, slice};
 
 unsafe extern "C" {
+  fn mmu_invalidate_bp_by_va(virt_addr: usize);
+  fn mmu_invalidate_tlb_by_va(virt_addr: usize);
   fn mmu_update_table_entry_local(
     desc_vaddr: usize,
     virt_addr: usize,
@@ -18,7 +20,7 @@ const LEVEL_1_TABLE_SHIFT_LONG: usize = 2;
 const LEVEL_2_TABLE_SHIFT_LONG: usize = 9;
 const LEVEL_3_TABLE_SHIFT_LONG: usize = 9;
 
-const LEVEL_3_SHIFT_LONG: usize = arch::get_page_shift();
+const LEVEL_3_SHIFT_LONG: usize = super::init::get_page_shift();
 const LEVEL_2_SHIFT_LONG: usize = LEVEL_3_SHIFT_LONG + LEVEL_3_TABLE_SHIFT_LONG;
 const LEVEL_1_SHIFT_LONG: usize = LEVEL_2_SHIFT_LONG + LEVEL_2_TABLE_SHIFT_LONG;
 
@@ -26,7 +28,7 @@ const LEVEL_1_INDEX_MASK_LONG: usize = (1 << LEVEL_1_TABLE_SHIFT_LONG) - 1;
 const LEVEL_2_INDEX_MASK_LONG: usize = (1 << LEVEL_2_TABLE_SHIFT_LONG) - 1;
 const LEVEL_3_INDEX_MASK_LONG: usize = (1 << LEVEL_3_TABLE_SHIFT_LONG) - 1;
 
-const TABLE_SIZE_LONG: usize = arch::get_page_size();
+const TABLE_SIZE_LONG: usize = super::init::get_page_size();
 
 /// If using 40-bit virtual addresses, bits [39:32] of the address are bits
 /// [7:0] of the high descriptor word.
@@ -50,16 +52,21 @@ const MM_ACCESS_FLAG_LONG: usize = 0b1 << 10;
 
 /// The start code has already configured the MAIR registers. Only the memory
 /// type indices are needed here. See `mm.s`.
-const MM_NORMAL_MAIR_IDX_LONG: usize = 0x0;
-const MM_DEVICE_MAIR_IDX_LONG: usize = 0x1;
+const MT_NORMAL_MAIR_IDX_LONG: usize = 0x0;
+const MT_DEVICE_MAIR_IDX_LONG: usize = 0x1;
+
+/// Mark normal memory as inner shareable to ensure coherency within the inner
+/// shareable domain.
+const MT_NORMAL_SH_INNER_LONG: usize = 0b11 << 8;
 
 const TYPE_MASK: usize = 0x3;
 
 /// The maximum number of local mappings a task can maintain.
-const MAX_LOCAL_MAPPINGS: usize = arch::get_page_size() >> arch::get_page_table_entry_shift();
+const MAX_LOCAL_MAPPINGS: usize =
+  super::init::get_page_size() >> super::init::get_page_table_entry_shift();
 
 /// Translation table level. LPAE supports up to 3 levels of translation.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone)]
 enum TableLevel {
   Level1,
   Level2,
@@ -160,6 +167,39 @@ pub fn map_memory(
   );
 }
 
+/// Unmap a block of memory.
+///
+/// # Parameters
+///
+/// * `virtual_base` - The kernel segment base address.
+/// * `vm_split` - The virtual memory split.
+/// * `pages_start` - The physical address of the task's starting page table.
+/// * `virt` - Base of the virtual address range.
+/// * `size` - Size of the physical address range.
+/// * `allocator` - The allocator that will provide new table pages.
+///
+/// # Description
+///
+/// In addition to removing the table entries for the specified block, page
+/// tables will be freed where possible.
+pub fn unmap_memory(
+  virtual_base: usize,
+  vm_split: usize,
+  pages_start: usize,
+  virt: usize,
+  size: usize,
+  allocator: &mut impl PageAllocator,
+) {
+  clear_table(
+    virtual_base,
+    get_first_table_level(virtual_base, vm_split, virt),
+    pages_start,
+    virt,
+    size,
+    allocator,
+  )
+}
+
 /// Maps a thread-local table into the kernel's address space.
 ///
 /// # Parameters
@@ -180,23 +220,25 @@ pub fn map_memory(
 ///
 /// # Assumptions
 ///
-/// The Level 1 and Level 2 page tables are in linear memory.
+/// * The function has exclusive access to the table entry.
+/// * The Level 1 and Level 2 page tables are in linear memory.
 pub fn map_thread_local_table(
   vm_split: usize,
   pages_start: usize,
   local_virt: usize,
   table_addr: usize,
 ) {
-  let virtual_base = arch::get_kernel_virtual_base();
+  let virtual_base = super::init::get_kernel_virtual_base();
   let start_level = get_first_table_level(virtual_base, vm_split, local_virt);
   let l2_addr: usize;
 
-  if start_level == TableLevel::Level1 {
-    let table = get_table(virtual_base + pages_start);
-    let idx = get_descriptor_index(local_virt, start_level);
-    l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]).unwrap();
-  } else {
-    l2_addr = pages_start;
+  match start_level {
+    TableLevel::Level1 => {
+      let table = get_table(virtual_base + pages_start);
+      let idx = get_descriptor_index(local_virt, start_level);
+      l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]).unwrap();
+    }
+    _ => l2_addr = pages_start,
   }
 
   let l2_vaddr = virtual_base + l2_addr;
@@ -237,9 +279,9 @@ pub fn map_page_local(
   assert!(count < MAX_LOCAL_MAPPINGS);
 
   let idx = count << 1;
-  let page_vaddr = section_vaddr + (count << arch::get_page_shift());
+  let page_vaddr = section_vaddr + (count << super::init::get_page_shift());
   let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
-  let (desc, desc_high) = make_descriptor(TableLevel::Level3, page_addr, device).unwrap();
+  let (desc, desc_high) = make_descriptor(TableLevel::Level3, page_addr, device);
 
   unsafe {
     mmu_update_table_entry_local(desc_vaddr, page_vaddr, desc, desc_high);
@@ -271,12 +313,30 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
     return;
   }
 
-  let page_vaddr = section_vaddr + ((count - 1) << arch::get_page_shift());
+  let page_vaddr = section_vaddr + ((count - 1) << super::init::get_page_shift());
   let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
 
   unsafe {
     mmu_update_table_entry_local(desc_vaddr, page_vaddr, 0, 0);
   }
+}
+
+/// Invalidate the TLB by virtual address.
+///
+/// # Parameters
+///
+/// * `virt_addr` - The virtual address to invalidate.
+pub fn invalidate_tlb_by_va(virt_addr: usize) {
+  unsafe { mmu_invalidate_tlb_by_va(virt_addr) };
+}
+
+/// Invalidate the branch predictors by virtual address.
+///
+/// # Parameters
+///
+/// * `virt_addr` - The virtual address to invalidate.
+pub fn invalidate_bp_by_va(virt_addr: usize) {
+  unsafe { mmu_invalidate_bp_by_va(virt_addr) };
 }
 
 /// Get the first table level to translate a given virtual address.
@@ -292,7 +352,9 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
 ///   NOTE: The MMU will automatically skip Level 1 translation if the size of
 ///         a segment is 1 GiB or less. In a 3/1 split, the MMU expects that
 ///         TTBR1 points to the kernel segment's Level 2 table.
-//
+///
+///   TODO: Handle 1/3 split?
+///
 /// # Returns
 ///
 /// Level 2 if the virtual address is in the kernel address space and a 3/1
@@ -408,8 +470,8 @@ fn fill_table_compact(
   device: bool,
   allocator: &mut impl PageAllocator,
 ) {
-  let page_size = arch::get_page_size();
-  let section_size = arch::get_section_size();
+  let page_size = super::init::get_page_size();
+  let section_size = super::init::get_section_size();
 
   assert!(bits::is_aligned(virt, page_size));
   assert!(bits::is_aligned(base, page_size));
@@ -451,7 +513,7 @@ fn fill_table_compact(
         MappingStrategy::Compact,
       );
     } else {
-      (desc, desc_high) = make_descriptor(table_level, base, device).unwrap();
+      (desc, desc_high) = make_descriptor(table_level, base, device);
     }
 
     table[idx] = desc;
@@ -491,7 +553,7 @@ fn fill_table_granular(
   device: bool,
   allocator: &mut impl PageAllocator,
 ) {
-  let page_size = arch::get_page_size();
+  let page_size = super::init::get_page_size();
 
   assert!(bits::is_aligned(virt, page_size));
   assert!(bits::is_aligned(base, page_size));
@@ -509,21 +571,22 @@ fn fill_table_granular(
 
     // For levels 1 and 2, allocate new tables as necessary and descend to the
     // next level down. At level 3, add individual page entries.
-    if table_level != TableLevel::Level3 {
-      (desc, desc_high) = alloc_table_and_fill(
-        virtual_base,
-        table_level,
-        table[idx],
-        table[idx + 1],
-        virt,
-        base,
-        size,
-        device,
-        allocator,
-        MappingStrategy::Granular,
-      );
-    } else {
-      (desc, desc_high) = make_descriptor(table_level, base, device).unwrap();
+    match table_level {
+      TableLevel::Level3 => (desc, desc_high) = make_descriptor(table_level, base, device),
+      _ => {
+        (desc, desc_high) = alloc_table_and_fill(
+          virtual_base,
+          table_level,
+          table[idx],
+          table[idx + 1],
+          virt,
+          base,
+          size,
+          device,
+          allocator,
+          MappingStrategy::Granular,
+        );
+      }
     }
 
     table[idx] = desc;
@@ -541,6 +604,90 @@ fn fill_table_granular(
   }
 }
 
+/// Recursively clear the entries for the specified block.
+///
+/// # Parameters
+///
+/// * `virtual_base` - The kernel segment base address.
+/// * `table_level` - The current table level.
+/// * `table_addr` - The physical address of the current table.
+/// * `virt` - Base of the virtual address range.
+/// * `size` - Size of the physical address range.
+/// * `allocator` - The allocator used to allocate tables.
+///
+/// # Description
+///
+/// When a table is no longer needed, the allocator will be used to free the
+/// table.
+fn clear_table(
+  virtual_base: usize,
+  table_level: TableLevel,
+  table_addr: usize,
+  virt: usize,
+  size: usize,
+  allocator: &mut impl PageAllocator,
+) {
+  let page_size = super::init::get_page_size();
+
+  assert!(bits::is_aligned(virt, page_size));
+
+  let entry_size = get_table_entry_size(table_level);
+  let mut virt = virt;
+  let mut size = size;
+  let table = get_table(virtual_base + table_addr);
+
+  loop {
+    let idx = get_descriptor_index(virt, table_level);
+
+    // For a level 1 or 2 table, descend to the next level table if the current
+    // entry is a pointer, otherwise just clear the entry. After descending to
+    // the next level table, check if the virtual address is aligned on the
+    // entry size and the size to clear is at least the entry size. If so, free
+    // the table. For a level 3 table, just clear the entries.
+    match table_level {
+      TableLevel::Level3 => {
+        table[idx] = 0;
+        table[idx + 1] = 0;
+      }
+      _ => {
+        if is_pointer_entry(table_level, table[idx], table[idx + 1]) {
+          let next_addr =
+            get_phys_addr_from_descriptor(table_level, table[idx], table[idx + 1]).unwrap();
+
+          clear_table(
+            virtual_base,
+            get_next_table(table_level).unwrap(),
+            next_addr,
+            virt,
+            size,
+            allocator,
+          );
+
+          if bits::is_aligned(virt, entry_size) && size >= entry_size {
+            // We should never get here for bootstrap tables that are baked into
+            // the kernel image. Those tables should never be completely empty.
+            // If we do, free will assert since the tables were not allocated
+            // through a linear allocator.
+            allocator.free(next_addr, 1);
+            table[idx] = 0;
+            table[idx + 1] = 0;
+          }
+        } else {
+          table[idx] = 0;
+          table[idx + 1] = 0;
+        }
+      }
+    }
+
+    if size <= entry_size {
+      break;
+    }
+
+    virt += entry_size;
+    size -= entry_size;
+  }
+}
+
 /// Given a table level, returns the size covered by a single entry.
 ///
 /// # Parameters
@@ -554,7 +701,7 @@ fn get_table_entry_size(table_level: TableLevel) -> usize {
   match table_level {
     TableLevel::Level1 => 1 << LEVEL_1_SHIFT_LONG,
     TableLevel::Level2 => 1 << LEVEL_2_SHIFT_LONG,
-    TableLevel::Level3 => arch::get_page_size(),
+    TableLevel::Level3 => super::init::get_page_size(),
   }
 }
 
@@ -620,36 +767,20 @@ fn get_phys_addr_from_descriptor(
 /// * `phys_addr` - The physical address of the block or page.
 /// * `device` - Whether this block or page maps to device memory.
 ///
-/// # Description
-///
-/// The table level must be 2 or 3. The Level 1 table can only point to Level 2
-/// tables.
-///
 /// # Returns
 ///
-/// A tuple with the low and high 32-bits of the descriptor, or None if it is
-/// not possible to make a descriptor.
-fn make_descriptor(
-  table_level: TableLevel,
-  phys_addr: usize,
-  device: bool,
-) -> Option<(usize, usize)> {
+/// A tuple with the low and high 32-bits of the descriptor.
+fn make_descriptor(table_level: TableLevel, phys_addr: usize, device: bool) -> (usize, usize) {
   let mair_idx = if device {
-    MM_DEVICE_MAIR_IDX_LONG
+    MT_DEVICE_MAIR_IDX_LONG
   } else {
-    MM_NORMAL_MAIR_IDX_LONG
+    MT_NORMAL_MAIR_IDX_LONG
   };
 
   match table_level {
-    TableLevel::Level1 => {
-      Some(make_block_descriptor(phys_addr & LEVEL_1_BLOCK_LOW_MASK_LONG, mair_idx))
-    }
-    TableLevel::Level2 => {
-      Some(make_block_descriptor(phys_addr & LEVEL_2_BLOCK_LOW_MASK_LONG, mair_idx))
-    }
-    TableLevel::Level3 => {
-      Some(make_page_descriptor(phys_addr & TABLE_OR_PAGE_LOW_MASK_LONG, mair_idx))
-    }
+    TableLevel::Level1 => make_block_descriptor(phys_addr & LEVEL_1_BLOCK_LOW_MASK_LONG, mair_idx),
+    TableLevel::Level2 => make_block_descriptor(phys_addr & LEVEL_2_BLOCK_LOW_MASK_LONG, mair_idx),
+    TableLevel::Level3 => make_page_descriptor(phys_addr & TABLE_OR_PAGE_LOW_MASK_LONG, mair_idx),
   }
 }
 
@@ -668,7 +799,14 @@ fn make_descriptor(
 ///
 /// A tuple with the low and high 32-bits of the descriptor.
 fn make_block_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
-  (phys_addr | (mair_idx << 2) | MM_ACCESS_FLAG_LONG | MM_BLOCK_FLAG_LONG, 0)
+  (
+    phys_addr
+      | (mair_idx << 2)
+      | MT_NORMAL_SH_INNER_LONG
+      | MM_ACCESS_FLAG_LONG
+      | MM_BLOCK_FLAG_LONG,
+    0,
+  )
 }
 
 /// Make a Level 3 page descriptor.
@@ -686,7 +824,10 @@ fn make_block_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
 ///
 /// A tuple with the low and high 32-bits of the descriptor.
 fn make_page_descriptor(phys_addr: usize, mair_idx: usize) -> (usize, usize) {
-  (phys_addr | (mair_idx << 2) | MM_ACCESS_FLAG_LONG | MM_PAGE_FLAG_LONG, 0)
+  (
+    phys_addr | (mair_idx << 2) | MT_NORMAL_SH_INNER_LONG | MM_ACCESS_FLAG_LONG | MM_PAGE_FLAG_LONG,
+    0,
+  )
 }
 
 /// Determine if a descriptor is a table pointer.
@@ -722,7 +863,7 @@ fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<
   match table_level {
     TableLevel::Level3 => None,
     _ => {
-      if !bits::is_aligned(phys_addr, arch::get_page_size()) {
+      if !bits::is_aligned(phys_addr, super::init::get_page_size()) {
         return None;
       }
 
@@ -731,7 +872,11 @@ fn make_pointer_descriptor(table_level: TableLevel, phys_addr: usize) -> Option<
       // index in bits [4:2] and the access flag in bit 10. Leaving bits [7:6]
       // as zero makes the page read/write for the kernel.
       Some((
-        phys_addr | (MM_NORMAL_MAIR_IDX_LONG << 2) | MM_ACCESS_FLAG_LONG | MM_PAGE_TABLE_FLAG_LONG,
+        phys_addr
+          | (MT_NORMAL_MAIR_IDX_LONG << 2)
+          | MT_NORMAL_SH_INNER_LONG
+          | MM_ACCESS_FLAG_LONG
+          | MM_PAGE_TABLE_FLAG_LONG,
         0,
       ))
     }

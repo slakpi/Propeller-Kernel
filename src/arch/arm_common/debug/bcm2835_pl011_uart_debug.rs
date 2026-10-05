@@ -24,8 +24,8 @@ const UART_FR_FIFO_FULL: u32 = 1 << 5;
 /// The base physical address of the BCM2835 serial device registers.
 const PHYSICAL_BASE_ADDRESS: usize = 0x3f20_1000;
 
-/// The size of the range to map in bytes.
-const PHYSICAL_SIZE: usize = 0x1000;
+/// The size of the range to map in pages.
+const PHYSICAL_PAGES: usize = 1;
 
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
@@ -36,9 +36,9 @@ static mut VIRTUAL_BASE: usize = 0;
 /// Serial port guard.
 static mut DRIVER_LOCK: SpinLock<()> = SpinLock::new(());
 
-/// Get the physical base address and number of bytes to map.
+/// Get the physical base address and number of pages to map.
 pub fn get_physical_range() -> (usize, usize) {
-  (PHYSICAL_BASE_ADDRESS, PHYSICAL_SIZE)
+  (PHYSICAL_BASE_ADDRESS, PHYSICAL_PAGES)
 }
 
 /// Initialize the serial debug output driver.

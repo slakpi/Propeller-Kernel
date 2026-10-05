@@ -26,7 +26,6 @@ struct DtbCoreScanner<'config> {
   primary_id: usize,
   string_map: StringMap,
   addr_cells: u32,
-  def_enable_method: CoreEnableMethod,
 }
 
 impl<'config> DtbCoreScanner<'config> {
@@ -58,7 +57,6 @@ impl<'config> DtbCoreScanner<'config> {
       primary_id,
       string_map: Self::build_string_map(),
       addr_cells: 0,
-      def_enable_method: CoreEnableMethod::Invalid,
     }
   }
 
@@ -105,8 +103,8 @@ impl<'config> DtbCoreScanner<'config> {
         }
 
         Some(DtbStringTag::DtbPropEnableMethod) => {
-          self.def_enable_method =
-            Self::read_enable_method(reader, &mut tmp_cursor, &self.string_map)?
+          let enable_method = Self::read_enable_method(reader, &mut tmp_cursor, &self.string_map)?;
+          self.config.set_enable_method(Some(enable_method));
         }
 
         _ => reader.skip_and_align(header.size, &mut tmp_cursor),
@@ -146,7 +144,8 @@ impl<'config> DtbCoreScanner<'config> {
         }
 
         Some(DtbStringTag::DtbPropEnableMethod) => {
-          core.enable_method = Self::read_enable_method(reader, &mut tmp_cursor, &self.string_map)?
+          let enable_method = Self::read_enable_method(reader, &mut tmp_cursor, &self.string_map)?;
+          core.enable_method = Some(enable_method);
         }
 
         Some(DtbStringTag::DtbPropCpuReleaseAddr) => {
@@ -172,12 +171,6 @@ impl<'config> DtbCoreScanner<'config> {
     // primary core.
     if !is_primary && self.config.get_core_count() > core_config::MAX_CORES - 1 {
       return Ok(());
-    }
-
-    // Use the default enable method if this core does not specify one.
-    match core.enable_method {
-      CoreEnableMethod::Invalid => core.enable_method = self.def_enable_method,
-      _ => {}
     }
 
     // Do not worry if we were unable to add the core. If there are too many
@@ -387,14 +380,6 @@ pub fn get_core_config(config: &mut CoreConfig, blob_vaddr: usize) -> bool {
   // Validate that we have at least one core.
   if config.get_core_count() == 0 {
     return false;
-  }
-
-  // Validate that the enable method for each core is supported.
-  for core in config.get_cores() {
-    match core.enable_method {
-      CoreEnableMethod::Invalid => return false,
-      _ => {}
-    }
   }
 
   true

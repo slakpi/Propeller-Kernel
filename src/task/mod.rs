@@ -145,6 +145,8 @@ pub fn init() {
     INITIALIZED = true;
   }
 
+  debug_print!("task init...\n");
+
   // There is no need to go through the normal context switch process. The
   // bootstrap task is technically already "running." We only need to set the
   // running task pointer on the primary core and map the task's local mapping
@@ -154,6 +156,4 @@ pub fn init() {
 
   // Update the current task pointer.
   Task::set_current_task(task);
-
-  debug_print!("task init complete.\n");
 }

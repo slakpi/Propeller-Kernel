@@ -7,6 +7,7 @@ use crate::support::memory::{
   MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone, PageAllocator,
 };
 use crate::support::{bits, device_tree, dtb};
+use crate::sync::SpinLock;
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -40,20 +41,20 @@ const VECTORS_VIRTUAL_BASE: usize = 0xffff_0000;
 /// The base virtual address of the recursive map area.
 const RECURSIVE_MAP_AREA_VIRTUAL_BASE: usize = 0xffc0_0000;
 
-/// The base virtual address of the driver area.
-const DRIVER_VIRTUAL_BASE: usize = 0xf800_0000;
-
 /// The size of the virtual area reserved for the page directory.
 const PAGE_DATABASE_SIZE: usize = 24 * 1024 * 1024;
 
 /// The base virtual address of the page directory.
 const PAGE_DATABASE_VIRTUAL_BASE: usize = RECURSIVE_MAP_AREA_VIRTUAL_BASE - PAGE_DATABASE_SIZE;
 
+/// Each core has five different ISR stacks.
+const ISR_STACKS_PER_CORE: usize = 5;
+
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct KernelConfig {
+struct KernelConfig {
   virtual_base: usize,
   page_size: usize,
   blob: usize,
@@ -86,14 +87,23 @@ static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
 /// System device tree.
 static mut DEVICE_TREE: device_tree::DeviceTree = device_tree::DeviceTree::new();
 
-/// The base virtual address and size of the thread local mapping area.
-static mut THREAD_LOCAL_AREA_VIRTUAL_BASE: usize = 0;
+/// The base virtual address of the driver area.
+///
+///   NOTE: If using serial debug output, the driver virtual base will be
+///         incremented to reserve the mappings for the UART. This value must
+///         not be modified once initialization is complete.
+static mut DRIVER_VIRTUAL_BASE: usize = 0xf800_0000;
 
+/// The base virtual address and size of the thread local mapping area.
+///
+///   NOTE: These must not be modified once initialization is complete.
+static mut THREAD_LOCAL_AREA_VIRTUAL_BASE: usize = 0;
 static mut THREAD_LOCAL_AREA_SIZE: usize = 0;
 
 /// The base virtual address and size of the ISR stack area.
+///
+///   NOTE: These must not be modified once initialization is complete.
 static mut ISR_STACK_AREA_VIRTUAL_BASE: usize = 0;
-
 static mut ISR_STACK_AREA_SIZE: usize = 0;
 
 /// Tags memory ranges with the appropriate zone.
@@ -195,7 +205,8 @@ pub fn init(config_addr: usize) {
   );
 
   debug_print!("\n\n=== Propeller (ARM 32-bit) ===\n");
-  debug_print!("Booting on core {:x}.\n", cpu::get_id());
+  debug_print!("Booting on core {:x}...\n", cpu::get_id());
+  debug_print!("arch init...\n");
 
   // Require 4 KiB pages.
   assert_eq!(kconfig.page_size, PAGE_SIZE);
@@ -220,8 +231,6 @@ pub fn init(config_addr: usize) {
   init_core_config(blob_vaddr);
   init_memory_config(blob_vaddr, blob_size);
   init_direct_map(&mut allocator);
-
-  debug_print!("arch init complete.\n");
 }
 
 /// Initialize symmetric multiprocessing.
@@ -229,15 +238,21 @@ pub fn init(config_addr: usize) {
 /// # Parameters
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
-pub fn init_smp(allocator: &mut impl PageAllocator) {
-  if get_device_tree().get_core_config().get_core_count() < 2 {
+pub fn init_smp(allocator: &SpinLock<impl PageAllocator>) {
+  let core_config = get_device_tree().get_core_config();
+
+  // If the system only has a single core, it is already set up. There is no
+  // need to do anything else.
+  if core_config.get_core_count() < 2 {
     return;
   }
 
   debug_print!("--- SMP Initialization ---\n");
-  init_isr_stacks(allocator);
+  init_isr_stacks(allocator.lock().as_mut());
 
-  debug_print!("arch SMP init complete.\n");
+  debug_print!("Releasing secondary cores...\n");
+  let start_addr = _secondary_start as *const () as usize - get_kernel_virtual_base();
+  core_config.release(start_addr);
 }
 
 /// Get the size of a page.
@@ -385,6 +400,23 @@ pub fn get_vm_split() -> usize {
 pub fn get_high_mem_base() -> usize {
   usize::MAX - get_kernel_virtual_base() - HIGH_MEM_SIZE + 1
 }
+/// Get the virtual base of the driver I/O mapping area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+pub fn get_driver_area_virtual_base() -> usize {
+  unsafe { DRIVER_VIRTUAL_BASE }
+}
+
+/// Get the size of the driver I/O mapping area.
+///
+/// # Description
+///
+///   NOTE: Private to the ARM architecture
+pub fn get_driver_area_size() -> usize {
+  unsafe { THREAD_LOCAL_AREA_VIRTUAL_BASE - DRIVER_VIRTUAL_BASE }
+}
 
 /// Get the virtual base of the recursive mapping area.
 ///
@@ -448,7 +480,7 @@ pub fn get_isr_stack_size() -> usize {
 /// # Description
 ///
 ///   NOTE: Private to the ARM architecture.
-pub fn get_kernel_config() -> &'static KernelConfig {
+fn get_kernel_config() -> &'static KernelConfig {
   unsafe { ptr::addr_of!(KERNEL_CONFIG).as_ref().unwrap() }
 }
 
@@ -467,19 +499,30 @@ fn init_serial_debug_output(
 ) {
   let range = debug::get_physical_range();
 
+  assert!(bits::is_aligned(range.0, get_page_size()));
+
+  let size = range.1 << get_page_shift();
+  if size == 0 {
+    return;
+  }
+
+  let virt_addr = unsafe { DRIVER_VIRTUAL_BASE };
+
   mm::map_memory(
     virt_base,
     vm_split,
     pages_start,
-    DRIVER_VIRTUAL_BASE,
+    virt_addr,
     range.0,
-    range.1,
+    size,
     true,
     allocator,
     MappingStrategy::Granular,
   );
 
-  debug::init(DRIVER_VIRTUAL_BASE);
+  debug::init(virt_addr);
+
+  unsafe { DRIVER_VIRTUAL_BASE += size };
 }
 
 /// Initialize the core configuration.
@@ -497,9 +540,10 @@ fn init_core_config(blob_vaddr: usize) {
 
   assert!(dtb_cpu::get_core_config(core_config, blob_vaddr));
 
+  debug_print!(" Cores:\n");
   for core in core_config.get_cores() {
-    let s = core::str::from_utf8(&core.get_core_type()).unwrap_or("Unknown");
-    debug_print!("Core {:x}: {}\n", core.get_id(), s)
+    let s = core::str::from_utf8(&core.core_type).unwrap_or("Unknown");
+    debug_print!("  {:x}: {}\n", core.id, s)
   }
 }
 
@@ -532,7 +576,8 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
   let blob_size = bits::align_up(kconfig.blob + blob_size, section_size) - blob_start;
 
   unsafe {
-    ISR_STACK_AREA_SIZE = ((kconfig.kernel_stack_pages + 1) << page_shift) * 4 * core_count;
+    ISR_STACK_AREA_SIZE =
+      ((kconfig.kernel_stack_pages + 1) << page_shift) * ISR_STACKS_PER_CORE * core_count;
     ISR_STACK_AREA_VIRTUAL_BASE = PAGE_DATABASE_VIRTUAL_BASE - ISR_STACK_AREA_SIZE;
     THREAD_LOCAL_AREA_SIZE = section_size * core_count;
     THREAD_LOCAL_AREA_VIRTUAL_BASE =
@@ -574,8 +619,9 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
     mem_config.exclude_range(range);
   }
 
+  debug_print!(" Memory: \n");
   for range in mem_config.get_ranges() {
-    debug_print!("Memory: {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
+    debug_print!("  {:#x} - {:#x}\n", range.base, range.base + range.size - 1);
   }
 }
 
@@ -603,6 +649,7 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
   // same amount of time overhead as copying the memory configuration and
   // excluding the high memory area from the set but does not incur the stack
   // space or time cost of copying the configuration.
+  debug_print!(" Linear Kernel Memory Mappings:\n");
   for range in get_device_tree().get_memory_config().get_ranges() {
     let (left, _) = range.exclude(&excl).unwrap();
 
@@ -619,7 +666,7 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
       );
 
       debug_print!(
-        "Map: {:#x} - {:#x} => {:#x}\n",
+        "  {:#x} - {:#x} => {:#x}\n",
         left.base,
         left.base + left.size - 1,
         kconfig.virtual_base + left.base
@@ -636,16 +683,19 @@ fn init_direct_map(allocator: &mut impl PageAllocator) {
 ///
 /// # Description
 ///
-/// Allocates SVC, ABT, IRQ, and FIQ for each secondary core, maps the stacks
-/// into the ISR stack area, and adds entries to the stack list. The primary
-/// core's stacks will have already been mapped to the end of the ISR stack
-/// area. Cores 1..N will be placed in the ISR stack area starting at the
+/// Allocates SVC, IRQ, ABT, UND, and FIQ for each secondary core, maps the
+/// stacks into the ISR stack area, and adds entries to the stack list. The
+/// primary core's stacks will have already been mapped to the end of the ISR
+/// stack area. Cores 1..N will be placed in the ISR stack area starting at the
 /// beginning.
 ///
 /// # Assumptions
 ///
 /// Assumes multiple cores.
 fn init_isr_stacks(allocator: &mut impl PageAllocator) {
+  // Each entry has the core index and the five stack addresses.
+  const ENTRY_LEN: usize = ISR_STACKS_PER_CORE + 1;
+
   let kconfig = get_kernel_config();
   let core_config = get_device_tree().get_core_config();
   let page_shift = get_page_shift();
@@ -658,7 +708,7 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
       kconfig.page_size,
     )
   };
-  let mut entry_index = 5;
+  let mut entry_index = ENTRY_LEN;
 
   debug_print!("ISR Stacks:\n");
   debug_print!(
@@ -672,12 +722,13 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
   );
 
   for (index, core) in core_config.get_cores().iter().enumerate().skip(1) {
-    table[entry_index] = core.get_id();
+    table[entry_index] = core.id;
 
     // Calculate the virtual base address for the stacks.
-    let mut stack_vbase = stack_area_base + (step_size * 4 * (index - 1)) + (1 << page_shift);
+    let mut stack_vbase =
+      stack_area_base + (step_size * ISR_STACKS_PER_CORE * (index - 1)) + (1 << page_shift);
 
-    for s in 1..=5 {
+    for s in 1..ENTRY_LEN {
       // We must successfully allocate stacks for each core.
       let (stack_base, _) = allocator.alloc(kconfig.kernel_stack_pages).unwrap();
 
@@ -709,6 +760,6 @@ fn init_isr_stacks(allocator: &mut impl PageAllocator) {
       table[entry_index + 5],
     );
 
-    entry_index += 6;
+    entry_index += ENTRY_LEN;
   }
 }
