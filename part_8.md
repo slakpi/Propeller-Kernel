@@ -8,7 +8,7 @@ Fast forward several months, and I was mired in data aborts while trying to boot
 
 ## The Symptoms
 
-In Parts 6 and 7, we set up the initial translation tables. In a future part, we are going to duplicate Part 7 for the secondary cores. That will involve allocating memory for the secondary core stacks and writing the pointers to a table that the cores can reference when they start up.
+In Parts 6 and 7, we set up the initial translation tables and the primary core stack. In a future part, we are going to duplicate Part 7 for the secondary cores. That will involve allocating memory for the secondary core stacks and writing the pointers to a table that the cores can reference when they start up.
 
 From the programmer's view, the translation tables and the stack table are "in memory." However, caching exists and, if you followed along with Propeller's code, you enabled caching for the inner shareable domain.
 
