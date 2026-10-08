@@ -7,6 +7,7 @@
 * [Part 5 - First Steps After Power On](https://slakpi.github.io/Propeller-Kernel/part_5.html)
 * [Part 6 - Initial Virtual Memory Setup](https://slakpi.github.io/Propeller-Kernel/part_6.html)
 * [Part 7 - Stack Virtual Addressing Setup](https://slakpi.github.io/Propeller-Kernel/part_7.html)
+* [Part 8 - Interlude](https://slakpi.github.io/Propeller-Kernel/part_8.html)
 
 -----
 © Randy Widell
