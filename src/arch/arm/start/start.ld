@@ -57,21 +57,21 @@ SECTIONS
     . += __page_size;
   }
 
-  .text.vectors : ALIGN(__page_size)
+  .vectors : ALIGN(__page_size)
   {
     __kernel_exception_vectors_start = .;
 
-    KEEP(*(.text.vectors))
+    KEEP(*(.vectors))
 
     . = ALIGN(__page_size);
     __kernel_exception_vectors_end = .;
   }
 
-  .text.stubs : ALIGN(__page_size)
+  .stubs : ALIGN(__page_size)
   {
     __kernel_exception_stubs_start = .;
 
-    KEEP(*(.text.stubs))
+    KEEP(*(.stubs))
 
     . = ALIGN(__page_size);
     __kernel_exception_stubs_end = .;
