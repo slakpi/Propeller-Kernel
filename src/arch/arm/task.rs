@@ -4,7 +4,7 @@
 mod tests;
 
 use super::mm;
-use crate::arch::{self, cpu};
+use crate::arch::interrupts;
 use crate::support::{bits, core_config};
 use core::{ptr, slice};
 
@@ -24,6 +24,8 @@ static mut INITIALIZED: bool = false;
 /// Helper type to force alignment of the local mapping table. The compiler will
 /// ensure the local mapping table is aligned to a page boundary and rearrange
 /// the remaining fields of the task structure accordingly.
+///
+///   TODO: This assumes 4 KiB pages.
 #[repr(C, align(4096))]
 struct AlignedTable([usize; 1024]);
 
@@ -80,8 +82,10 @@ impl TaskContext {
       return None;
     }
 
-    let index = (virt_addr - 0xc000_0000) >> arch::get_section_shift();
-    Some(super::init::get_recursive_map_area_virtual_base() + (index << arch::get_page_shift()))
+    let index = (virt_addr - 0xc000_0000) >> super::init::get_section_shift();
+    Some(
+      super::init::get_recursive_map_area_virtual_base() + (index << super::init::get_page_shift()),
+    )
   }
 
   /// Get the base virtual address of the thread local area for the current core.
@@ -97,8 +101,13 @@ impl TaskContext {
   ///
   ///   NOTE: Private to the ARM architecture.
   fn get_thread_local_virtual_base(core_idx: usize) -> usize {
-    assert!(core_idx < arch::get_device_tree().get_core_config().get_core_count());
-    let offset = core_idx << arch::get_section_shift();
+    assert!(
+      core_idx
+        < super::init::get_device_tree()
+          .get_core_config()
+          .get_core_count()
+    );
+    let offset = core_idx << super::init::get_section_shift();
     super::init::get_thread_local_area_virtual_base() + offset
   }
 
@@ -184,20 +193,21 @@ impl TaskContext {
       return super::init::get_kernel_virtual_base() + page_addr;
     }
 
-    // TODO: Interrupts need to be disabled before proceeding to ensure a
-    //       context switch does not happen before the task is pinned.
-
-    let core_idx = super::init::get_current_core_index();
+    // Mask interrupts. We need to be sure the task does not migrate to another
+    // core while pinning it.
+    let int_state = interrupts::save_and_mask_all_interrupts();
 
     // Pin the core to the current core if not already pinned. If already
     // pinned, we should be on the same core.
+    let core_idx = super::init::get_current_core_index();
+
     if self.pin_mask.is_none() {
       let mut pin_mask = AffinityMask::new(core_config::MAX_CORES);
       pin_mask.set_bit(core_idx);
       self.pin_mask = Some(pin_mask);
     }
 
-    // TODO: Interrupts may be re-enabled here; the rest is thread-safe.
+    interrupts::restore_interrupt_state(int_state);
 
     let local_base = Self::get_thread_local_virtual_base(core_idx);
     let table_vaddr = Self::get_page_virtual_address_for_virtual_address(local_base);
@@ -252,14 +262,14 @@ pub fn init_bootstrap_context() -> TaskContext {
   //   NOTE: The bootstrap task's local mapping table is part of the kernel
   //         image in linear memory. It is safe to just subtract the virtual
   //         base to get the physical address.
-  let table_addr = table_vaddr - arch::get_kernel_virtual_base();
+  let table_addr = table_vaddr - super::init::get_kernel_virtual_base();
 
   // Map the task's local mapping table into the kernel address space using the
   // current core's table slot.
   mm::map_thread_local_table(
     super::init::get_vm_split(),
     super::init::get_kernel_pages_start(),
-    TaskContext::get_thread_local_virtual_base(arch::get_current_core_index()),
+    TaskContext::get_thread_local_virtual_base(super::init::get_current_core_index()),
     table_addr,
   );
 
