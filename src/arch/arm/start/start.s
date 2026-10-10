@@ -156,7 +156,7 @@ primary_core_boot:
 // Create the bootstrap kernel page tables.
   mov     r1, r0            // DTB blob size to r1
   mov     r0, r10           // DTB blob address to r0
-  ldr     r2, =__vmsplit
+  mov     r2, #VMSPLIT
   bl      mmu_create_kernel_page_tables
 
 // Setup the MMU and enable it.
@@ -174,7 +174,7 @@ primary_core_begin_virt_addressing:
 // ISR stack setup with virtual addressing enabled. This has to be done while
 // the identity tables are still valid and the stack is empty.
   ldr     r0, =PRIMARY_SVC_STACK_START
-  ldr     r1, =__vmsplit
+  mov     r1, #VMSPLIT
   bl      mmu_setup_primary_core_stacks
 
 // Clean up the MMU setup now that the identity tables are not required.
@@ -209,10 +209,10 @@ primary_core_begin_virt_addressing:
   mov     fp, sp
   sub     sp, sp, #4 * 10
 
-  ldr     r2, =__virtual_start
+  ldr     r2, =VIRTUAL_START
   str     r2, [sp, #4 * 0]
 
-  ldr     r1, =__page_size
+  mov     r1, #PAGE_SIZE
   str     r1, [sp, #4 * 1]
 
   str     r10, [sp, #4 * 2]
@@ -231,7 +231,7 @@ primary_core_begin_virt_addressing:
   ldr     r1, =__kernel_pages_size
   str     r1, [sp, #4 * 6]
 
-  ldr     r1, =__vmsplit
+  mov     r1, #VMSPLIT
   str     r1, [sp, #4 * 7]
 
   ldr     r1, =__kernel_stack_list
@@ -336,7 +336,7 @@ setup_stacks:
 // Calculate the stack size with the guard page.
   ldr     r1, =__kernel_stack_pages
   add     r1, r1, #1
-  ldr     r2, =__page_size
+  mov     r2, #PAGE_SIZE
   mul     r1, r1, r2
 
 // Store the SVC stack start.
@@ -409,7 +409,7 @@ setup_secondary_core_stacks:
 // Find the core in the stack table. The stack list is a single page, so put a
 // bound on the loop for a single page. If the core is not found, just halt.
   ldr     r1, =__kernel_stack_list
-  ldr     r2, =__page_size
+  mov     r2, #PAGE_SIZE
   add     r2, r1, r2
 
 1:

@@ -31,8 +31,8 @@
 .equ SCTLR_EL1_RESERVED,   ((3 << 28) | (3 << 22) | (1 << 20) | (1 << 11) | (3 << 7))
 .equ SCTLR_EL1_DEFAULT,    (SCTLR_EL1_RESERVED | SCTLR_EL1_C)
 
-// The primary core's ISR stack starts at the base of the page database area.
-.equ PRIMARY_STACK_START, 0xfffffe0000000000
+// The primary core's ISR stack starts at the base of the driver area.
+.equ PRIMARY_STACK_START, 0xfffffdffc0000000
 
 .section ".text.boot"
 
@@ -280,8 +280,8 @@ primary_core_begin_virt_addressing:
   mov     fp, sp
   sub     sp, sp, #8 * 9
 
-  ldr     x9, =__virtual_start
-  ldr     x10, =__page_size
+  mov     x9, #VIRTUAL_START
+  mov     x10, #PAGE_SIZE
   stp     x9, x10, [sp, #8 * 0]
 
   ldr     x10, =__kernel_start
@@ -387,7 +387,7 @@ setup_secondary_core_stack:
 // Find the core in the stack table. The stack list is a single page, so put a
 // bound on the loop for a single page. If the core is not found, just halt.
   ldr     x1, =__kernel_stack_list
-  ldr     x2, =__page_size
+  mov     x2, #PAGE_SIZE
   add     x2, x1, x2
 
 1:

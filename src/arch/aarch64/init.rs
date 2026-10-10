@@ -32,11 +32,13 @@ const PAGE_TABLE_ENTRY_SIZE: usize = 8;
 
 const PAGE_TABLE_ENTRY_SHIFT: usize = 3;
 
-/// The size of the virtual area reserved for the page directory (2 TiB).
+/// The base virtual address and size of the page database area.
+const PAGE_DATABASE_VIRTUAL_BASE: usize = 0xffff_fe00_0000_0000;
 const PAGE_DATABASE_SIZE: usize = 0x200_0000_0000;
 
-/// The base virtual address of the page directory.
-const PAGE_DATABASE_VIRTUAL_BASE: usize = 0xffff_fe00_0000_0000;
+/// The base virtual address and size of the driver area.
+const DRIVER_AREA_SIZE: usize = 0x4000_0000;
+const DRIVER_AREA_VIRTUAL_BASE: usize = PAGE_DATABASE_VIRTUAL_BASE - DRIVER_AREA_SIZE;
 
 /// Basic kernel configuration provided by the start code. All address are
 /// physical.
@@ -292,11 +294,53 @@ pub fn get_page_database_size() -> usize {
   PAGE_DATABASE_SIZE
 }
 
+/// Get the virtual base of the driver I/O mapping area.
+///
+/// # Description
+///
+///   NOTE: Private to the AArch64 architecture
+pub fn get_driver_area_virtual_base() -> usize {
+  DRIVER_AREA_VIRTUAL_BASE
+}
+
+/// Get the size of the driver I/O mapping area.
+///
+/// # Description
+///
+///   NOTE: Private to the AArch64 architecture
+pub fn get_driver_area_size() -> usize {
+  DRIVER_AREA_SIZE
+}
+
+/// Get the physical base address of the kernel page table area.
+///
+/// # Description
+///
+///   NOTE: Private to the AArch64 architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+pub fn get_kernel_pages_start() -> usize {
+  unsafe { KERNEL_CONFIG.kernel_pages_start }
+}
+
+/// Get the size of the kernel page table area.
+///
+/// # Description
+///
+///   NOTE: Private to the AArch64 architecture
+///
+///   NOTE: The interface guarantees read-only access outside of the module and
+///         one-time initialization is assumed.
+pub fn get_kernel_pages_size() -> usize {
+  unsafe { KERNEL_CONFIG.kernel_pages_start }
+}
+
 /// Get the base virtual address of the ISR stack area.
 ///
 /// # Description
 ///
-///   NOTE: Private to the ARM architecture
+///   NOTE: Private to the AArch64 architecture
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
@@ -308,7 +352,7 @@ pub fn get_isr_stack_area_virtual_base() -> usize {
 ///
 /// # Description
 ///
-///   NOTE: Private to the ARM architecture
+///   NOTE: Private to the AArch64 architecture
 ///
 ///   NOTE: The interface guarantees read-only access outside of the module and
 ///         one-time initialization is assumed.
@@ -416,7 +460,7 @@ fn init_memory_config(blob_vaddr: usize, blob_size: usize) {
 
   unsafe {
     ISR_STACK_AREA_SIZE = ((kconfig.kernel_stack_pages + 1) << page_shift) * core_count;
-    ISR_STACK_AREA_VIRTUAL_BASE = PAGE_DATABASE_VIRTUAL_BASE - ISR_STACK_AREA_SIZE;
+    ISR_STACK_AREA_VIRTUAL_BASE = DRIVER_AREA_VIRTUAL_BASE - ISR_STACK_AREA_SIZE;
   }
 
   let tagger = RangeZoneTagger {};

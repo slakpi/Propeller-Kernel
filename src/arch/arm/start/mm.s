@@ -92,7 +92,6 @@
 //   | L1 |   L2   |   L3   |  Offset   |
 //   +----+--------+--------+-----------+
 //   31  30       21       12           0
-.equ PAGE_SHIFT,         12
 .equ L1_TABLE_SHIFT,     2
 .equ L2_TABLE_SHIFT,     9
 .equ L3_TABLE_SHIFT,     9
@@ -167,7 +166,7 @@ mmu_create_kernel_page_tables:
   mov     r1, r9            // Use the same L2 table for the kernel and vectors.
   cmp     r8, #3            // Using 3/1 split?
   beq     1f                // If yes, skip L1 initialization
-  ldr     r1, =__virtual_start
+  ldr     r1, =VIRTUAL_START
   bl      init_table
   
 1:
@@ -195,7 +194,7 @@ mmu_create_kernel_page_tables:
 //         to prevent the code from being re-written.
   mov     r0, r9
   mov     r1, #0
-  ldr     r2, =__virtual_start
+  ldr     r2, =VIRTUAL_START
   add     r3, r2, r5
   sub     r3, r3, #1
   ldr     r4, =MMU_NORMAL_RW_FLAGS | MM_TYPE_BLOCK
@@ -211,7 +210,7 @@ mmu_create_kernel_page_tables:
 
   mov     r0, r9
   mov     r1, r6
-  ldr     r2, =__virtual_start
+  ldr     r2, =VIRTUAL_START
   add     r2, r2, r6
   add     r3, r2, r7
   sub     r3, r3, #1
@@ -310,15 +309,15 @@ mmu_setup_primary_core_stacks:
 // r10 - Temp
   push    {r4, r5, r6, r7, r8, r9, r10}
 
-  ldr     r9, =__page_size
+  mov     r9, #PAGE_SIZE
 
 // If using a 2/2 split, we will have a L1 and L2 table and we just need to
 // skip the L1 table. If using a 3/1 split, we only have a L2 table. NOTE: the
 // MMU is on, so we will get a virtual address for __kernel_pages_start. It will
-// be linearly-mapped, however, so we can just subtract __virtual_start, then
+// be linearly-mapped, however, so we can just subtract VIRTUAL_START, then
 // use physical addresses for both the table entries and writing to the table.
   ldr     r4, =__kernel_pages_start
-  ldr     r10, =__virtual_start
+  ldr     r10, =VIRTUAL_START
   sub     r4, r4, r10       // L1 or L2 physical address
   cmp     r1, #3
   beq     1f                // If a 3/1 split, skip table increment
@@ -370,7 +369,7 @@ mmu_setup_primary_core_stacks:
 
 // Get the physical base of the FIQ stack.
   ldr     r6, =__kernel_fiq_stack_end
-  ldr     r10, =__virtual_start
+  ldr     r10, =VIRTUAL_START
   sub     r6, r6, r10
 
 // Set up the page entries.
@@ -439,7 +438,7 @@ mmu_setup_and_enable:
 
 // Configure the bootstrap TTBCR value. If the split value is 3, a 3/1 split is
 // used. Otherwise, a 2/2 split is used.
-  ldr     r1, =__vmsplit
+  mov     r1, #VMSPLIT
   ldr     r0, =TTBCR_VALUE
 
   cmp     r1, #3
@@ -486,75 +485,6 @@ mmu_cleanup_ttbr:
   mov     r1, #0
   mcrr    p15, 0, r0, r1, c2
   isb
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// Update an entry in a translation table and selectively invalidate the caches
-/// by virtual address.
-///
-/// # Parameters
-///
-/// * r0 - The descriptor virtual address.
-/// * r1 - The virtual address being remapped.
-/// * r2 - The low word of the large descriptor.
-/// * r3 - The high word of the large descriptor.
-///
-/// # Description
-///
-/// The unified TLB and Branch Predictors will be invalidated for the virtual
-/// address being remapped. This function is appropriate for precision changes
-/// to the translation tables, e.g. swapping a task's local mapping table into
-/// the kernel's address space or mapping a page locally.
-.global mmu_update_table_entry_local
-mmu_update_table_entry_local:
-// Make the new entry and ensure visibility. Cleaning the cache line when the
-// table is write-back cacheable memory is not required with an ARMv7
-// implementation that includes multiprocessing extensions.
-  str     r2, [r0], #4
-  str     r3, [r0], #4
-  dsb
-
-// Invalidate unified TLB and Branch Predictor by virtual address (See TLBIMVA
-// in B3.18.7 and BPIMVA in B3.18.6), and ensure completion.
-  mcr     p15, 0, r1, c8, c7, 1
-  mcr     p15, 0, r1, c7, c5, 7
-  dsb
-  isb
-
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// Invalidate the TLB by virtual address.
-///
-/// # Parameters
-///
-/// * r0 - The base virtual address to invalidate.
-.global mmu_invalidate_tlb_by_va
-mmu_invalidate_tlb_by_va:
-  mcr     p15, 0, r0, c8, c7, 1
-  dsb
-  isb
-
-  mov     pc, lr
-
-
-///-----------------------------------------------------------------------------
-///
-/// Invalidate the branch predictors by virtual address.
-///
-/// # Parameters
-///
-/// * r0 - The base virtual address to invalidate.
-.global mmu_invalidate_bp_by_va
-mmu_invalidate_bp_by_va:
-  mcr     p15, 0, r0, c7, c5, 7
-  dsb
-  isb
-
   mov     pc, lr
 
 
@@ -615,7 +545,7 @@ section_align_block:
 /// Assumes that the page after the L2 table is free.
 map_vectors:
 // Get the address for the new L3 table.
-  ldr     r2, =__page_size
+  mov     r2, #PAGE_SIZE
   add     r2, r2, r0
   orr     r2, r2, #MM_TYPE_PAGE_TABLE
 
@@ -639,7 +569,7 @@ map_vectors:
   str     r2, [r3], #4
 
 // Make the descriptor for the stubs.
-  ldr     r2, =__page_size
+  mov     r2, #PAGE_SIZE
   add     r1, r1, r2
   mov     r2, #0
   str     r1, [r3], #4
@@ -682,7 +612,7 @@ init_table:
 // between two 32-bit registers. r3 will be the lower 32-bits and the upper
 // 32-bits will be 0 since our physical address does not need the extra 8 bits
 // and we do not need to set any of the upper attributes.
-  ldr     r3, =__page_size
+  mov     r3, #PAGE_SIZE
   add     r0, r0, r3        // r0 is now the lower L2 table address
   mov     r3, r0
   orr     r3, r3, #MM_TYPE_PAGE_TABLE
@@ -693,7 +623,7 @@ init_table:
   str     r3, [r2], #4      // Upper 32-bits
 
 // Create the table entry for the upper 1 GiB. See above.
-  ldr     r3, =__page_size
+  mov     r3, #PAGE_SIZE
   add     r1, r0, r3        // r1 is now the upper L2 table address
   mov     r3, r1
   orr     r3, r3, #MM_TYPE_PAGE_TABLE

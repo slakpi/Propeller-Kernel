@@ -1,6 +1,7 @@
 //! Core Configuration Utilities
 
-use crate::arch::{self, cpu, io};
+use crate::arch::{self, cpu};
+use crate::io;
 use crate::support::{bits, hash, hash_map};
 use crate::task::Task;
 
@@ -92,12 +93,15 @@ impl Core {
     let task = Task::get_current_task_mut();
     let phys_page = bits::align_down(self.release_addr, arch::get_page_size());
     let offset = self.release_addr - phys_page;
-    let ptr = (task.map_page(phys_page) + offset) as *mut usize;
+    let virt_addr = (task.map_page(phys_page) + offset);
 
     unsafe {
+      let ptr = virt_addr as *mut usize;
       *ptr = start_addr;
     }
-    cpu::flush_data_cache_by_va(ptr as usize);
+
+    cpu::flush_data_cache_by_va(virt_addr);
+    cpu::data_sync_barrier();
     cpu::send_event();
 
     task.unmap_page();
@@ -116,17 +120,18 @@ impl Core {
     // The BCM2836 only has four cores and the lower two bits of their
     // identifiers need to be set to correspond to the mailbox numbers.
     let index = self.id & 0x3;
+
     let Some(virt_addr) = io::map_io(BCM2836_PHYS_ADDR, 1) else {
       return;
     };
-    let ptr = (virt_addr + OFFSETS[index]) as *mut usize;
 
     unsafe {
+      let ptr = (virt_addr + OFFSETS[index]) as *mut usize;
       *ptr = start_addr;
     }
-    cpu::send_event();
 
     io::unmap_io(virt_addr);
+    cpu::send_event();
   }
 }
 

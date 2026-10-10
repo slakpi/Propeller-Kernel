@@ -47,7 +47,78 @@ cpu_get_id:
 .global cpu_flush_data_cache_by_va
 cpu_flush_data_cache_by_va:
   dc      civac, x0
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the TLB by virtual address.
+///
+/// # Parameters
+///
+/// * x0 - The base virtual address to invalidate.
+/// * x1 - The address space ID to invalidate.
+.global cpu_flush_tlb_by_va
+cpu_flush_tlb_by_va:
+  ubfx    x0, x0, #PAGE_SHIFT, #(48 - PAGE_SHIFT)
+  bfi     x0, x1, #48, #16
+  tlbi    vae1, x0
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the TLB by virtual address range.
+///
+/// # Parameters
+///
+/// * x0 - The base virtual address to invalidate.
+/// * x1 - The number of pages to invalidate.
+/// * x2 - The address space ID to invalidate.
+.global cpu_flush_tlb_by_va_range
+cpu_flush_tlb_by_va_range:
+  ubfx    x0, x0, #PAGE_SHIFT, #(48 - PAGE_SHIFT)
+  bfi     x0, x2, #48, #16
+  mov     x3, #PAGE_SIZE
+
+  cmp     x1, #0
+  b.eq    2f
+
+1:
+  tlbi    vae1, x0
+  add     x0, x0, x3
+  subs    x1, x1, #1
+  b.ne    1b
+
+2:
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Issue a data synchronization barrier.
+.global cpu_data_sync_barrier
+cpu_data_sync_barrier:
   dsb     sy
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Issue an instruction synchronization barrier.
+.global cpu_instruction_sync_barrier
+cpu_instruction_sync_barrier:
+  isb     sy
+  ret
+
+
+///-----------------------------------------------------------------------------
+///
+/// Issue data and instruction synchronization barriers.
+.global cpu_sync_barriers
+cpu_sync_barriers:
+  dsb     sy
+  isb     sy
   ret
 
 

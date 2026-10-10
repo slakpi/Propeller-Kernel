@@ -128,6 +128,37 @@ pub fn map_memory(
   );
 }
 
+/// Unmap a block of memory.
+///
+/// # Parameters
+///
+/// * `virtual_base` - The kernel segment base address.
+/// * `pages_start` - The physical address of the task's starting page table.
+/// * `virt` - Base of the virtual address range.
+/// * `size` - Size of the physical address range.
+/// * `allocator` - The allocator that will provide new table pages.
+///
+/// # Description
+///
+/// In addition to removing the table entries for the specified block, page
+/// tables will be freed where possible.
+pub fn unmap_memory(
+  virtual_base: usize,
+  pages_start: usize,
+  virt: usize,
+  size: usize,
+  allocator: &mut impl PageAllocator,
+) {
+  clear_table(
+    virtual_base,
+    TableLevel::Level1,
+    pages_start,
+    virt,
+    size,
+    allocator,
+  )
+}
+
 /// Wrapper for strategy-specific fill functions.
 ///
 /// # Parameters
@@ -327,6 +358,90 @@ fn fill_table_granular(
 
     virt += entry_size;
     base += entry_size;
+    size -= entry_size;
+  }
+}
+
+/// Recursively clear the entries for the specified block.
+///
+/// # Parameters
+///
+/// * `virtual_base` - The kernel segment base address.
+/// * `table_level` - The current table level.
+/// * `table_addr` - The physical address of the current table.
+/// * `virt` - Base of the virtual address range.
+/// * `size` - Size of the physical address range.
+/// * `allocator` - The allocator used to allocate tables.
+///
+/// # Description
+///
+/// When a table is no longer needed, the allocator will be used to free the
+/// table.
+fn clear_table(
+  virtual_base: usize,
+  table_level: TableLevel,
+  table_addr: usize,
+  virt: usize,
+  size: usize,
+  allocator: &mut impl PageAllocator,
+) {
+  let page_size = super::init::get_page_size();
+
+  assert!(bits::is_aligned(virt, page_size));
+
+  let entry_size = get_table_entry_size(table_level);
+  let mut virt = virt;
+  let mut size = size;
+  let table = get_table(virtual_base + table_addr);
+
+  loop {
+    let idx = get_descriptor_index(virt, table_level);
+
+    // For a level 1 or 2 table, descend to the next level table if the current
+    // entry is a pointer, otherwise just clear the entry. After descending to
+    // the next level table, check if the virtual address is aligned on the
+    // entry size and the size to clear is at least the entry size. If so, free
+    // the table. For a level 3 table, just clear the entries.
+    match table_level {
+      TableLevel::Level3 => {
+        table[idx] = 0;
+        table[idx + 1] = 0;
+      }
+      _ => {
+        if is_pointer_entry(table_level, table[idx]) {
+          let next_addr =
+            get_phys_addr_from_descriptor(table_level, table[idx]).unwrap();
+
+          clear_table(
+            virtual_base,
+            get_next_table(table_level).unwrap(),
+            next_addr,
+            virt,
+            size,
+            allocator,
+          );
+
+          if bits::is_aligned(virt, entry_size) && size >= entry_size {
+            // We should never get here for bootstrap tables that are baked into
+            // the kernel image. Those tables should never be completely empty.
+            // If we do, free will assert since the tables were not allocated
+            // through a linear allocator.
+            allocator.free(next_addr, 1);
+            table[idx] = 0;
+            table[idx + 1] = 0;
+          }
+        } else {
+          table[idx] = 0;
+          table[idx + 1] = 0;
+        }
+      }
+    }
+
+    if size <= entry_size {
+      break;
+    }
+
+    virt += entry_size;
     size -= entry_size;
   }
 }

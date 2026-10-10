@@ -413,7 +413,7 @@ Threads store the physical address of their thread-local table in their context 
 
 ##### Hardware Area
 
-There is current nothing interesting going on here. Likely, Propeller will allow drivers to permanently map their devices into this area.
+The hardware area is a block of virtual addresses tracked by the I/O module. Drivers can use `map_io` to map a contiguous block of physical device memory into the kernel's address space through this area.
 
 #### Multi-Core Initialization
 
@@ -560,13 +560,15 @@ After initializing the core database, Propeller initializes a statically-allocat
 Propeller uses the canonical 256 TiB arrangement for a 64-bit address space and allows up to just under 254 TiB of physical memory accessed through a fixed, linear mapping.
 
     +-----------------+ 0xffff_ffff_ffff_ffff    -+
-    | Page Database   | 2 TiB                     |    K S
-    |.................| 0xffff_fe00_0000_0000     |    E E
-    | ISR Stacks      |                           |    R G
-    |.................|                           |    N M
-    |                 |                           |    E E
-    | Linear Mappings |                           |    L N
-    |                 |                           |      T
+    | Page Database   | 2 TiB                     |
+    |.................| 0xffff_fe00_0000_0000     |    K S
+    | Hardware Area   | 1 GiB                     |    E E
+    |.................| 0xffff_fdff_c000_0000     |    R G
+    | ISR Stacks      |                           |    N M
+    |.................|                           |    E E
+    |                 |                           |    L N
+    | Linear Mappings |                           |      T
+    |                 |                           |
     +-----------------+ 0xffff_0000_0000_0000    -+
     | / / / / / / / / |
     | / / / / / / / / |
@@ -599,6 +601,10 @@ The process is easily reversed to calculate a page physical address from a page 
 We are not worrying about NUMA architectures, just UMA. So, a model similar to the Linux SPARSEMEM model is not really necessary. This model is also similar to the Windows NT Page Frame Database circa 1990 per the Windows Research Kernel documents.
 
 Reserving 2 TiB at the top of the kernel segment means the actual maximum on addressable memory is roughly 254 TiB. "Roughly" because the ISR Stack Area grows with the number of cores, but to a very small degree compared to 2 TiB.
+
+##### Hardware Area
+
+The hardware area is a block of virtual addresses tracked by the I/O module. Drivers can use `map_io` to map a contiguous block of physical device memory into the kernel's address space through this area.
 
 ##### ISR Stacks
 

@@ -25,7 +25,6 @@
 //   | / / / / / / / |   L1   |   L2   |   L3   |   L4   |  Offset   |
 //   +---------------+--------+--------+--------+--------+-----------+
 //   63             48       39       30       21       12           0
-.equ PAGE_SHIFT,      12
 .equ TABLE_SHIFT,     9
 .equ TABLE_ENTRY_CNT, (1 << TABLE_SHIFT)
 .equ SECTION_SHIFT,   (PAGE_SHIFT + TABLE_SHIFT)
@@ -151,7 +150,7 @@ mmu_create_kernel_page_tables:
 
 // Create the L1 and L2 page tables.
   adrp    x0, __kernel_pages_start
-  ldr     x1, =__virtual_start
+  mov     x1, #VIRTUAL_START
   bl      init_tables
   mov     x22, x0
 
@@ -167,7 +166,7 @@ mmu_create_kernel_page_tables:
 //         to prevent the code from being re-written.
   mov     x0, x22
   mov     x1, #0
-  ldr     x2, =__virtual_start
+  mov     x2, #VIRTUAL_START
   add     x3, x2, x21
   sub     x3, x3, #1
   mov     x4, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_BLOCK)
@@ -189,7 +188,7 @@ mmu_create_kernel_page_tables:
   mov     x0, x22
   mov     x1, #0
   add     x1, x1, x19
-  ldr     x2, =__virtual_start
+  mov     x2, #VIRTUAL_START
   add     x2, x2, x19
   add     x3, x2, x20
   sub     x3, x3, #1
@@ -227,13 +226,13 @@ mmu_setup_primary_core_stack:
 // x14 - Page size
 // x15 - Temp
 
-  ldr     x14, =__page_size
+  mov     x14, #PAGE_SIZE
 
 // Set up the L1 and L2 pointers. NOTE: the MMU is on, so we will get a virtual
 // address for __kernel_pages_start. It will be linearly-mapped, however, so we
-// can just subtract __virtual_start.
+// can just subtract VIRTUAL_START.
   adrp    x9, __kernel_pages_start
-  ldr     x15, =__virtual_start
+  mov     x15, #VIRTUAL_START
   sub     x9, x9, x15
   mov     x10, x9
   add     x10, x10, x14     // Skip existing L1
@@ -297,9 +296,9 @@ mmu_setup_primary_core_stack:
 
 // Store the page pointers. NOTE: the MMU is on so we will get a virtual
 // address for __kernel_stack_end. It too is linearly mapped, so we can just
-// subtract __virtual_start.
+// subtract VIRTUAL_START.
   ldr     x11, =__kernel_stack_end
-  ldr     x15, =__virtual_start
+  mov     x15, #VIRTUAL_START
   sub     x11, x11, x15
   mov     x15, #(MMU_NORMAL_RW_FLAGS | MM_TYPE_PAGE)
   orr     x11, x11, x15
@@ -455,7 +454,7 @@ create_table_entry:
 
 // Get the pointer to the table at the next page. Assume the address is page-
 // aligned, so the offset bits are already zero.
-  ldr     x10, =__page_size
+  mov     x10, #PAGE_SIZE
   add     x10, x0, x10
 
 // Create the entry.
@@ -463,7 +462,7 @@ create_table_entry:
   str     x10, [x0, x9, lsl #3]
 
 // Return the address of the next page table.
-  ldr     x10, =__page_size
+  mov     x10, #PAGE_SIZE
   add     x0, x0, x10
 
   ret

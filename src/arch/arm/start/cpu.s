@@ -42,6 +42,134 @@ cpu_flush_data_cache_by_va:
 
 ///-----------------------------------------------------------------------------
 ///
+/// Invalidate the TLB by virtual address.
+///
+/// # Parameters
+///
+/// * r0 - The base virtual address to invalidate.
+/// * r1 - The address space ID to invalidate.
+///
+/// # Assumptions
+///
+/// Assumes the base virtual address is page aligned.
+.global cpu_flush_tlb_by_va
+cpu_flush_tlb_by_va:
+  ubfx    r0, r0, #PAGE_SHIFT, #(32 - PAGE_SHIFT)
+  lsl     r0, r0, #PAGE_SHIFT
+  bfi     r0, r1, #0, #8
+  mcr     p15, 0, r0, c8, c7, 1
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the TLB by virtual address range.
+///
+/// # Parameters
+///
+/// * r0 - The base virtual address to invalidate.
+/// * r1 - The number of pages to invalidate.
+/// * r2 - The address space ID to invalidate.
+///
+/// # Assumptions
+///
+/// Assumes the base virtual address is page aligned.
+.global cpu_flush_tlb_by_va_range
+cpu_flush_tlb_by_va_range:
+  ubfx    r0, r0, #PAGE_SHIFT, #(32 - PAGE_SHIFT)
+  lsl     r0, r0, #PAGE_SHIFT
+  bfi     r0, r2, #0, #8
+  mov     r3, #PAGE_SIZE
+
+  cmp     r1, #0
+  beq     2f
+
+1:
+  mcr     p15, 0, r0, c8, c7, 1
+  add     r0, r0, r3
+  subs    r1, r1, #1
+  bne     1b
+
+2:
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the branch predictors by virtual address.
+///
+/// # Parameters
+///
+/// * r0 - The base virtual address to invalidate.
+/// * r1 - The address space ID to invalidate.
+.global cpu_flush_bp_by_va
+cpu_flush_bp_by_va:
+  ubfx    r0, r0, #PAGE_SHIFT, #(32 - PAGE_SHIFT)
+  lsl     r0, r0, #PAGE_SHIFT
+  bfi     r0, r1, #0, #8
+  mcr     p15, 0, r0, c7, c5, 7
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Invalidate the branch predictors by virtual address range.
+///
+/// # Parameters
+///
+/// * r0 - The base virtual address to invalidate.
+/// * r1 - The number of pages to invalidate.
+/// * r2 - The address space ID to invalidate.
+.global cpu_flush_bp_by_va_range
+cpu_flush_bp_by_va_range:
+  ubfx    r0, r0, #PAGE_SHIFT, #(32 - PAGE_SHIFT)
+  lsl     r0, r0, #PAGE_SHIFT
+  bfi     r0, r2, #0, #8
+  mov     r3, #PAGE_SIZE
+
+  cmp     r1, #0
+  beq     2f
+
+1:
+  mcr     p15, 0, r0, c7, c5, 7
+  add     r0, r0, r3
+  subs    r1, r1, #1
+  bne     1b
+
+2:
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Issue a data synchronization barrier.
+.global cpu_data_sync_barrier
+cpu_data_sync_barrier:
+  dsb
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Issue an instruction synchronization barrier.
+.global cpu_instruction_sync_barrier
+cpu_instruction_sync_barrier:
+  isb
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
+/// Issue data and instruction synchronization barriers.
+.global cpu_sync_barriers
+cpu_sync_barriers:
+  dsb
+  isb
+  mov     pc, lr
+
+
+///-----------------------------------------------------------------------------
+///
 /// Signal all cores.
 .global cpu_send_event
 cpu_send_event:

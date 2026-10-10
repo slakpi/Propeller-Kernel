@@ -1,20 +1,10 @@
 //! ARM Memory Management
 
 use crate::arch;
+use crate::arch::cpu;
 use crate::support::bits;
 use crate::support::memory::{MappingStrategy, PageAllocator};
 use core::{ptr, slice};
-
-unsafe extern "C" {
-  fn mmu_invalidate_bp_by_va(virt_addr: usize);
-  fn mmu_invalidate_tlb_by_va(virt_addr: usize);
-  fn mmu_update_table_entry_local(
-    desc_vaddr: usize,
-    virt_addr: usize,
-    desc: usize,
-    desc_high: usize,
-  );
-}
 
 const LEVEL_1_TABLE_SHIFT_LONG: usize = 2;
 const LEVEL_2_TABLE_SHIFT_LONG: usize = 9;
@@ -241,14 +231,15 @@ pub fn map_thread_local_table(
     _ => l2_addr = pages_start,
   }
 
-  let l2_vaddr = virtual_base + l2_addr;
+  let table = get_table(virtual_base + l2_addr);
   let idx = get_descriptor_index(local_virt, TableLevel::Level2);
-  let desc_vaddr = l2_vaddr + (idx << bits::WORD_SHIFT);
   let (desc, desc_high) = make_pointer_descriptor(TableLevel::Level2, table_addr).unwrap();
+  table[idx] = desc;
+  table[idx + 1] = desc_high;
 
-  unsafe {
-    mmu_update_table_entry_local(desc_vaddr, local_virt, desc, desc_high);
-  }
+  cpu::flush_tlb_by_va(local_virt, 0);
+  cpu::flush_bp_by_va(local_virt, 0);
+  cpu::sync_barriers();
 }
 
 /// Map a page in the task's local mappings.
@@ -280,12 +271,13 @@ pub fn map_page_local(
 
   let idx = count << 1;
   let page_vaddr = section_vaddr + (count << super::init::get_page_shift());
-  let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
   let (desc, desc_high) = make_descriptor(TableLevel::Level3, page_addr, device);
+  table[idx] = desc;
+  table[idx + 1] = desc_high;
 
-  unsafe {
-    mmu_update_table_entry_local(desc_vaddr, page_vaddr, desc, desc_high);
-  }
+  cpu::flush_tlb_by_va(page_vaddr, 0);
+  cpu::flush_bp_by_va(page_vaddr, 0);
+  cpu::sync_barriers();
 
   page_vaddr
 }
@@ -314,29 +306,12 @@ pub fn unmap_page_local(table: &mut [usize], section_vaddr: usize, count: usize)
   }
 
   let page_vaddr = section_vaddr + ((count - 1) << super::init::get_page_shift());
-  let desc_vaddr = ptr::addr_of!(table[idx]) as usize;
+  table[idx] = 0;
+  table[idx + 1] = 0;
 
-  unsafe {
-    mmu_update_table_entry_local(desc_vaddr, page_vaddr, 0, 0);
-  }
-}
-
-/// Invalidate the TLB by virtual address.
-///
-/// # Parameters
-///
-/// * `virt_addr` - The virtual address to invalidate.
-pub fn invalidate_tlb_by_va(virt_addr: usize) {
-  unsafe { mmu_invalidate_tlb_by_va(virt_addr) };
-}
-
-/// Invalidate the branch predictors by virtual address.
-///
-/// # Parameters
-///
-/// * `virt_addr` - The virtual address to invalidate.
-pub fn invalidate_bp_by_va(virt_addr: usize) {
-  unsafe { mmu_invalidate_bp_by_va(virt_addr) };
+  cpu::flush_tlb_by_va(page_vaddr, 0);
+  cpu::flush_bp_by_va(page_vaddr, 0);
+  cpu::sync_barriers();
 }
 
 /// Get the first table level to translate a given virtual address.

@@ -5,12 +5,18 @@
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
     "-C", "link_arg=-Tsrc/arch/aarch64/start/start.ld",
+    "-C", "link_arg=--defsym=__page_size=4096",
+    "-C", "link_arg=--defsym=__kernel_stack_pages=2",
+    "-C", "link_arg=--defsym=__kernel_page_tables=16",
 ]
 runner = ".venv/bin/python support/post-build.py"
 
 [target.armv7a-none-eabi]
 rustflags = [
     "-C", "link_arg=-Tsrc/arch/arm/start/start.ld",
+    "-C", "link_arg=--defsym=__page_size=4096",
+    "-C", "link_arg=--defsym=__kernel_stack_pages=2",
+    "-C", "link_arg=--defsym=__kernel_page_tables=16",
 ]
 runner = ".venv/bin/python support/post-build.py"
 
@@ -18,6 +24,17 @@ runner = ".venv/bin/python support/post-build.py"
 target = []
 
 [env]
+# Common symbols for the ARMv7a start code.
+PAGE_SIZE_armv7a_none_eabi = "4096"
+PAGE_SHIFT_armv7a_none_eabi = "12"
+VMSPLIT_armv7a_none_eabi = "3"
+VIRTUAL_START_armv7a_none_eabi = "0xc0000000"
+
+# Common symbols for the AArch64 start code.
+PAGE_SIZE_aarch64_unknown_none_softfloat = "4096"
+PAGE_SHIFT_aarch64_unknown_none_softfloat = "12"
+VIRTUAL_START_aarch64_unknown_none_softfloat = "0xffff000000000000"
+
 # CC_<arch> and AR_<arch> should be defined in the user's global cargo config.
 # See https://doc.rust-lang.org/cargo/reference/config.html.
 #   NOTE: The configuration files assume the ARM GNU toolchain is used.

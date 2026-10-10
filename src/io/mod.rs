@@ -3,6 +3,8 @@
 use crate::arch;
 use crate::debug_print;
 
+pub use arch::io::{map_io, unmap_io};
+
 /// Re-initialization guard
 static mut INITIALIZED: bool = false;
 

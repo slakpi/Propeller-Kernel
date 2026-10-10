@@ -40,8 +40,15 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
     "src/arch/aarch64/start/task.s",
   ];
 
+  let page_size = env::var("PAGE_SIZE_aarch64_unknown_none_softfloat").unwrap();
+  let page_shift = env::var("PAGE_SHIFT_aarch64_unknown_none_softfloat").unwrap();
+  let virtual_start = env::var("VIRTUAL_START_aarch64_unknown_none_softfloat").unwrap();
+
   cfg
     .include("src/arch/aarch64/start/include")
+    .asm_flag(format!("-Wa,-defsym,PAGE_SIZE={}", page_size))
+    .asm_flag(format!("-Wa,-defsym,PAGE_SHIFT={}", page_shift))
+    .asm_flag(format!("-Wa,-defsym,VIRTUAL_START={}", virtual_start))
     .files(&AARCH64_START_FILES);
 
   println!("cargo:rerun-if-changed=src/arch/aarch64/start/start.ld");
@@ -70,8 +77,17 @@ fn configure_for_arm(cfg: &mut cc::Build) {
     "src/arch/arm/start/task.s",
   ];
 
+  let page_size = env::var("PAGE_SIZE_armv7a_none_eabi").unwrap();
+  let page_shift = env::var("PAGE_SHIFT_armv7a_none_eabi").unwrap();
+  let vmsplit = env::var("VMSPLIT_armv7a_none_eabi").unwrap();
+  let virtual_start = env::var("VIRTUAL_START_armv7a_none_eabi").unwrap();
+
   cfg
     .include("src/arch/arm/start/include")
+    .asm_flag(format!("-Wa,-defsym,PAGE_SIZE={}", page_size))
+    .asm_flag(format!("-Wa,-defsym,PAGE_SHIFT={}", page_shift))
+    .asm_flag(format!("-Wa,-defsym,VMSPLIT={}", vmsplit))
+    .asm_flag(format!("-Wa,-defsym,VIRTUAL_START={}", virtual_start))
     .files(&ARM_START_FILES);
 
   println!("cargo:rerun-if-changed=src/arch/arm/start/start.ld");
