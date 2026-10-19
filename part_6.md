@@ -65,13 +65,13 @@ Whenever the kernel preempts a running task and activates another task, it repla
 
 So, what are these "configurations"? Translation tables! A translation table maps virtual addresses to physical addresses. While a user task may see the entirety of its own address space, it can only access the addresses for which the kernel has provided translations. Accessing any other virtual address will cause an exception.
 
-> NOTE: An exception here is not necessarily a "bad" thing. It could be that the user task or the kernel is attempting to access memory it is not allowed to access. In the case of user task, it could also be that the task is accessing memory that has been swapped out and needs to be swapped back.
+> NOTE: An exception here is not necessarily a "bad" thing. It could be that the user task or the kernel is attempting to access memory it is not allowed to access. In the case of a user task, it could also be that the task is accessing memory that has been swapped out and needs to be swapped back.
 
 If a translation table had an entry for every word on a 32-bit system, the table would consume 1 GiB of memory. So, at their most granular level, tables map pages. If each entry in the table represents a 4 KiB page, the table now only consumes 1 MiB of memory.
 
 Can we do better? If, instead of a single monolithic table, the MMU translates in stages, a 32-bit system could use a 16 KiB table with 4,096 entries that map 1 MiB sections. The entries in this table could either map the entire 1 MiB section into virtual memory or point to a 1 KiB second-level table with 256 entries that map each 4 KiB page within the 1 MiB section into virtual memory.
 
-Virtual addresses spaces are typically sparse, so multiple levels of translation are far more space efficient if slightly slower.
+Virtual address spaces are typically sparse, so multiple levels of translation are far more space-efficient if slightly slower.
 
 ### ARM
 
@@ -83,7 +83,7 @@ The two-level scheme discussed above is how 32-bit ARM processors without [Large
 
 Instead of a 16 KiB Level 1 table and 1 KiB Level 2 tables, all tables are 4 KiB and  each table has 512 64-bit entries (only the first four are used at Level 1).
 
-An entry at Level 2 can either map a full 2 MiB section into virtual memory, or point to a Level 3 table that maps 4 KiB pages into virtual memory. When mapping a large contiguous chunk of memory, it can be more space and time efficient to skip Level 3 translation by mapping the chunk with 2 MiB sections.
+An entry at Level 2 can either map a full 2 MiB section into virtual memory, or point to a Level 3 table that maps 4 KiB pages into virtual memory. When mapping a large contiguous chunk of memory, it can be more space- and time-efficient to skip Level 3 translation by mapping the chunk with 2 MiB sections.
 
 LPAE is also required for a 3:1 split. Propeller will halt if LPAE is not present.
 
@@ -183,13 +183,9 @@ We can solve this problem the same way we solved the initial stack problem in Pa
 	| .text.boot      |
 	+-----------------+ base address
 
-Let's update the linker script reserve space for 16 translation tables.
+Let's update the linker script to reserve space for 16 translation tables.
 
 ```
-__page_size = 4096;
-__kernel_stack_pages = 2;
-__kernel_page_tables = 16;
-
 ...
 
 SECTIONS
@@ -205,9 +201,27 @@ SECTIONS
 }
 ```
 
+And update the `config.toml` file to define the symbol.
+
+```toml
+...
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = [
+    "-C", "link_arg=-Tsrc/arch/aarch64/start/start.ld",
+    "-C", "link_arg=--defsym=__page_size=4096",
+    "-C", "link_arg=--defsym=__kernel_stack_pages=2",
+    "-C", "link_arg=--defsym=__kernel_page_tables=16",
+]
+runner = ".venv/bin/python support/post-build.py"
+
+...
+```
+
+
 #### Step 1A: Is that all?
 
-Consider everything we have done up to this point. Remember the discussion about position-independent code being necessary so that the `PC` can add offsets the ***physical*** address it is using?
+Consider everything we have done up to this point. Remember the discussion about position-independent code being necessary so that the `PC` can add offsets to the ***physical*** address it is using?
 
 Now consider what we are about to do. We are about to provide the MMU with translation tables for the kernel's virtual address space and then turn the MMU on.
 
@@ -215,14 +229,9 @@ What is going to happen the moment after we turn the MMU on when the `PC` tries 
 
 We are far from having any user tasks running, so this problem is easily solved by configuring the MMU with one set of tables for the kernel's address space and a second set of identity tables that just map physical addresses back to the same physical address. After turning the MMU on, we add an instruction that performs a jump to a virtual kernel address and now the `PC` is using addresses in the kernel's virtual address space. Voila.
 
-Let's update the kernel image to add space for these identity tables. Also, let's add some markers to let us know what the virtual start address is (`__virtual_start`), where the kernel image starts (`__kernel_start`), the size of the kernel's text, rodata, data, and BSS sections (`__kernel_size`), and where the kernel image ends (`__kernel_end`).
+Let's update the kernel image to add space for these identity tables. Also, let's add some markers to let us know where the kernel image starts (`__kernel_start`), the size of the kernel's text, rodata, data, and BSS sections (`__kernel_size`), and where the kernel image ends (`__kernel_end`).
 
 ```
-__page_size = 4096;
-__kernel_stack_pages = 2;
-__kernel_page_tables = 16;
-__virtual_start = 0xffff000000000000;
-
 ...
 
 SECTIONS
@@ -283,7 +292,7 @@ We are going to map physical memory into the kernel's virtual address space, so 
 
 | Abbreviation | Description                              |
 |:-------------|:-----------------------------------------|
-| `VS`         | `__virtual_start`                         |
+| `VS`         | `VIRTUAL_START`                           |
 | `KS`         | `__kernel_start`                          |
 | `KE`         | Section-aligned `__kernel_end`            |
 | `PS`         | Blob pointer provided by the boot loader |
@@ -299,7 +308,7 @@ If all of that makes sense, one thing you may be asking is: How do we know the s
 
 Let me introduce you to the [Flattened DeviceTree format](https://devicetree-specification.readthedocs.io/en/latest/chapter5-flattened-format.html). [Section 5.2](https://devicetree-specification.readthedocs.io/en/latest/chapter5-flattened-format.html#header) discusses the format of the DTB header. The first two 32-bit words in the DTB header are the "magic" bytes (0xd00d_feed) followed by the total size of the DTB.
 
-[dtb.s](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/dtb.s) in the AArch64 start module has a small utility function named `dtb_quick_check`. This function checks the provided DTB address for the magic bytes, then either returns the size of DTB if the boot loader provided a DTB or returns 0 if the boot loader provided something other than a DTB.
+[dtb.s](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/dtb.s) in the AArch64 start module has a small utility function named `dtb_quick_check`. This function checks the provided DTB address for the magic bytes, then either returns the size of the DTB if the boot loader provided a DTB or returns 0 if the boot loader provided something other than a DTB.
 
 Picking up where Part 5 left off, the first thing the start code does after zeroing the BSS section is check the DTB size at [start.s:224](https://github.com/slakpi/Propeller-Kernel/blob/main/src/arch/aarch64/start/start.s#L224).
 
@@ -386,7 +395,7 @@ Finally, [`map_block`](https://github.com/slakpi/Propeller-Kernel/blob/main/src/
   bl      mmu_create_kernel_page_tables
 ```
 
-That's all for setting up the translation tables. It's a fair amount of code and bit fiddling, but conceptually pretty simple.
+That's all for setting up the translation tables. It's a fair amount of code and bit fiddly, but conceptually pretty simple.
 
 ### Step 3: Configure the MMU's global settings and enable it
 

@@ -42,7 +42,7 @@ Given the information above, mapping our current stack into virtual memory is go
 
 We are going to need to reserve part of the kernel's virtual address space for the stacks. How much space do we need to reserve?
 
-Recall that we currently have the problem of a stack overflow. Virtual addressing gives us the ability to take an exception if an attempt is made to write to an unmapped address. This gives us a good solution to the stack overflow problem: simply do not map the page before the stack. In the example below, we have a two page stack preceded by a page that does not exist in the translation tables.
+Recall that we currently have the problem of a stack overflow. Virtual addressing gives us the ability to take an exception if an attempt is made to write to an unmapped address. This gives us a good solution to the stack overflow problem: simply do not map the page before the stack. In the example below, we have a two-page stack preceded by a page that does not exist in the translation tables.
 
      +---------------------------+ Stack Start
      | Page 2                    |
@@ -162,7 +162,7 @@ When it is done, the EL1 stack will be mapped as:
     | / / / / / Guard / / / / / |
     +---------------------------+ 0xffff_fdff_ffff_d000
 
-Both functions do something a little sneaky, however. Recall that a function prologue saves the current stack pointer to the frame pointer register and a function epilogue restores the stack pointer. Both functions save the *virtual* SVC / EL1 stack pointer to frame pointer and restore that value at the end of the function.
+Both functions do something a little sneaky, however. Recall that a function prologue saves the current stack pointer to the frame pointer register and a function epilogue restores the stack pointer. Both functions save the *virtual* SVC / EL1 stack pointer to the frame pointer and restore that value at the end of the function.
 
 Ok! Now we just need to actually do the mapping right after we enable the MMU.
 
@@ -221,7 +221,7 @@ Hopefully, you have not had any issues with debugging through QEMU. So, go ahead
 (gdb) layout asm
 ```
 
-This should give you split window with an empty assembly listing at the top. Now use the `focus next` command to move focus from the assembly listing to the command window. That way, you can use the up/down arrows to cycle through commands rather than scroll the assembly listing.
+This should give you a split window with an empty assembly listing at the top. Now use the `focus next` command to move focus from the assembly listing to the command window. That way, you can use the up/down arrows to cycle through commands rather than scroll the assembly listing.
 
 ```
 (gdb) focus next

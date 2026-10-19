@@ -141,24 +141,39 @@ The global Cargo configuration specifies the toolchain binaries. Now, you need t
 [target.aarch64-unknown-none-softfloat]
 rustflags = [
     "-C", "link_arg=-Tsrc/arch/aarch64/start/start.ld",
+    "-C", "link_arg=--defsym=__page_size=4096",
 ]
 runner = ".venv/bin/python support/post-build.py"
 
 [target.armv7a-none-eabi]
 rustflags = [
     "-C", "link_arg=-Tsrc/arch/arm/start/start.ld",
+    "-C", "link_arg=--defsym=__page_size=4096",
 ]
 runner = ".venv/bin/python support/post-build.py"
 
 [env]
+# Common symbols for the ARMv7a start code.
+PAGE_SIZE_armv7a_none_eabi = "4096"
+PAGE_SHIFT_armv7a_none_eabi = "12"
+VMSPLIT_armv7a_none_eabi = "3"
+VIRTUAL_START_armv7a_none_eabi = "0xc0000000"
+
+# Common symbols for the AArch64 start code.
+PAGE_SIZE_aarch64_unknown_none_softfloat = "4096"
+PAGE_SHIFT_aarch64_unknown_none_softfloat = "12"
+VIRTUAL_START_aarch64_unknown_none_softfloat = "0xffff000000000000"
+
 # CC_<arch> and AR_<arch> should be defined in the user's global cargo config.
 # See https://doc.rust-lang.org/cargo/reference/config.html.
 #   NOTE: The configuration files assume the ARM GNU toolchain is used.
 ```
 
-The `[target.<target>]` sections specify Rust compiler options for individual targets. Each target uses `rustflags` to specify a GNU linker script that details the layout of the kernel image.
+The `[target.<target>]` sections specify Rust compiler options for individual targets. Each target uses `rustflags` to specify a GNU linker script that details the layout of the kernel image. The `--defsym` command line arguments defines the `__page_size` symbol that the linker script will use for layout.
 
 Each target also specifies `post-build.py` as the "runner" for the target. This will hijack the `cargo run` command to create the raw image and disassembly listing from the `cargo build` output.
+
+The `[env]` section defines environment variables that our build script will use to define the `PAGE_SIZE`, `PAGE_SHIFT`, `VMSPLIT`, and `VIRTUAL_START` literals for the start code. Our `build.rs` file will add these to the assembler command line.
 
 Let's also create a configuration file for QEMU. Create another configuration file called `<propeller>/.cargo/config-qemu.toml`. This file will inherit the project and global `config.toml`.
 
@@ -258,8 +273,6 @@ Do not worry too much about the parameters passed to `_start`. When the boot loa
 Now add the file `<propeller>/arch/aarch64/start/start.ld`:
 
 ```
-__page_size = 4096;
-
 ENTRY(_start)
 
 SECTIONS
@@ -293,7 +306,9 @@ SECTIONS
 
 You can read more about the GNU linker script format [here](https://sourceware.org/binutils/docs/ld/Scripts.html#Scripts). But, here is a brief overview:
 
-`__page_size = 4096;` We will talk about page sizes more later. For now, this is just a constant for aligning sections in the kernel image. It is not actually telling the processor to use 4 KiB pages.
+`__page_size` is provided on the linker command line with a value of 4,096. We will talk about page sizes more later. For now, this is just a constant for aligning sections in the kernel image. It is not actually telling the processor to use 4 KiB pages.
+
+> *NOTE:* We can actually define `__page_size` directly at the top of the linker script. However, centralizing the values in `config.toml` means we only need to edit one file if we ever change compile-time constants for a configuration.
 
 `ENTRY(_start)` tells the linker that `_start` is the kernel entry point.
 
@@ -360,8 +375,15 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
     "src/arch/aarch64/start/start.s",
   ];
 
+  let page_size = env::var("PAGE_SIZE_aarch64_unknown_none_softfloat").unwrap();
+  let page_shift = env::var("PAGE_SHIFT_aarch64_unknown_none_softfloat").unwrap();
+  let virtual_start = env::var("VIRTUAL_START_aarch64_unknown_none_softfloat").unwrap();
+
   cfg
     .include("src/arch/aarch64/start/include")
+    .asm_flag(format!("-Wa,-defsym,PAGE_SIZE={}", page_size))
+    .asm_flag(format!("-Wa,-defsym,PAGE_SHIFT={}", page_shift))
+    .asm_flag(format!("-Wa,-defsym,VIRTUAL_START={}", virtual_start))
     .files(&AARCH64_START_FILES);
 
   println!("cargo:rerun-if-changed=src/arch/aarch64/start/start.ld");
@@ -374,7 +396,9 @@ fn configure_for_aarch64(cfg: &mut cc::Build) {
 
 `AARCH64_START_FILES` is just an array where we will keep a list of the assembly source files to compile.
 
-The next line adds an include path for use later, and adds the list of assembly source files to the build.
+The next couple of lines retrieve the page size, page shift, and virtual start values from the environment.
+
+The next line adds an include path for use later, adds the symbol definitions for assembly files, and adds the list of assembly source files to the build.
 
 Build scripts communicate back to Cargo via `println!`, and the next couple of lines tell Cargo to rerun a build if the linker script or any of the assembly source files change.
 

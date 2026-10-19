@@ -204,9 +204,6 @@ We can actually reserve memory for the initial stack in the kernel image:
 By adding another data section to the linker script, we can reserve some memory for a stack.
 
 ```
-__page_size = 4096;
-__kernel_stack_pages = 2;
-
 ...
 
 SECTIONS
@@ -221,13 +218,29 @@ SECTIONS
 }
 ```
 
-This new section reserves 8 KiB in the kernel image for a stack and defines the `__kernel_stack_start` constant that our assembly code can use.
+We will also need to update `config.toml` to define `__kernel_stack_pages`.
+
+```toml
+...
+
+[target.aarch64-unknown-none-softfloat]
+rustflags = [
+    "-C", "link_arg=-Tsrc/arch/aarch64/start/start.ld",
+    "-C", "link_arg=--defsym=__page_size=4096",
+    "-C", "link_arg=--defsym=__kernel_stack_pages=2",
+]
+runner = ".venv/bin/python support/post-build.py"
+
+...
+```
+
+The new `.data.stack` section reserves 8 KiB in the kernel image for a stack and defines the `__kernel_stack_start` constant that our assembly code can use.
 
 Stacks for kernel threads *should be* relatively small compared to user thread stacks which, for example, default to 1 MiB on Windows. Compared to a user thread, a kernel thread should be doing as little as possible.
 
-There is another problem here that we will resolve once we enable the MMU: the threat of a stack overflow. By making a stack part of the kernel image, the stack can overflow into the rest of the kernel.
+There is another problem here that we will resolve once we enable the MMU: the threat of a stack overflow. By making a stack part of the kernel image, the stack can overflow into the rest of the kernel. Our stack is the last section in the image, meaning the stack could grow down through all of the other sections!
 
-We are going to be extremely conservative with the stack to avoid an early overflow because it will be incredibly hard to debug. Later, we will still need to be conservative with the stack, but an overflow will result in an immediate exception and be much easier to debug.
+We are going to be extremely conservative with the stack since an early overflow will be incredibly hard to debug. Later, we will still need to be conservative with the stack, but an overflow will result in an immediate exception and be much easier to debug.
 
 Stay tuned.
 
@@ -279,7 +292,7 @@ primary_core_boot:
   b       1b
 ```
 
-ARM, however, only has the `adr` instruction. It does the same thing as `ardp`, but it is limited to a 12-bit offset (+/- 4 KiB). It should be obvious from the linker script the stack start is well beyond 4 KiB from the `.text` section.
+ARM, however, only has the `adr` instruction. It does the same thing as `ardp`, but it is limited to a 12-bit offset (+/- 4 KiB). It should be obvious from the linker script that the stack start is well beyond 4 KiB from the `.text` section.
 
 To get around the limitation of `adr`, we are going to use a little indirection trick. Consider:
 

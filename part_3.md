@@ -41,7 +41,7 @@ This raw image can be dropped onto a SD card and booted by a Raspberry Pi, or lo
 
 We are using the software floating-point targets and disabling [NEON SIMD](https://en.wikipedia.org/wiki/ARM_architecture_family#Advanced_SIMD_(Neon)). When user code traps into the kernel for a [system call](https://en.wikipedia.org/wiki/System_call), we can save a great deal of time by not saving/restoring the floating-point and SIMD registers to/from memory *IF* we can guarantee that the kernel will not modify them.
 
-Using the software floating-point targets and disabling SIMD will ensure that compiler does not use vectorization optimizations, and any use of floating-point or SIMD instructions will raise an exception.
+Using the software floating-point targets and disabling SIMD will ensure that the compiler does not use vectorization optimizations, and any use of floating-point or SIMD instructions will raise an exception.
 
 ## Virtual Addresses
 
@@ -98,7 +98,7 @@ The boot loader is just going to set the [`PC`](https://en.wikipedia.org/wiki/Pr
 
 What if the kernel code wants to perform a jump or load some data, though? We told the linker to use virtual addresses, so any assembly that uses absolute addresses is going to try to use a virtual address. If the processor tries to jump to or load from an absolute virtual address it is going to end up halting on a bad address.
 
-This is where the `-fPIC` option to generate position-independent code from the architecture assembly source comes in. The compiler will generate code that jumps to or loads from addresses calculated by adding an offset computed at compile-time to the `PC` at run time. The early boot code does not have to know anything about virtual or physical address; it just has to deal in offsets!
+This is where the `-fPIC` option to generate position-independent code from the architecture assembly source comes in. The compiler will generate code that jumps to or loads from addresses calculated by adding an offset computed at compile-time to the `PC` at run-time. The early boot code does not have to know anything about virtual or physical addresses; it just has to deal in offsets!
 
 ## Kernel Image Layout
 
@@ -132,7 +132,7 @@ We will add a few more things to the linker script as we go, but this is pretty 
 
 Before the kernel can jump to any Rust code, it is going to have to do a lot of set up to meet the expectations of the Rust compiler. For example, Rust code assumes it has a stack. Where is the stack? Surely there is a stack somewhere! Well...no. I mean, yes...there's probably a pool of memory out there, but our kernel is in a dark cave at the moment with a woefully incomplete map of the system. Right now, that map is just a few constants provided by the linker script.
 
-Some of our next tasks are going to be setting aside some room in the kernel image for an initial stack, writing some very basic functions to set up the MMU, and then jump into Rust code.
+Some of our next tasks are going to be setting aside some room in the kernel image for an initial stack, writing some very basic functions to set up the MMU, and then jumping into Rust code.
 
 Setting up the initial stack will be surprisingly interesting!
 
@@ -168,7 +168,7 @@ _start:
 
 You can also reuse the AArch64 linker script verbatim.
 
-One big difference: When loading a 32-bit kernel, the boot loader used by Raspberry Pi models 2 and 3 expects the file to be named kernel7.img. The boot loader on a Raspberry Pi 4 on expects the file to be named kernel7l.img.
+One big difference: When loading a 32-bit kernel, the boot loader used by Raspberry Pi models 2 and 3 expects the file to be named kernel7.img. The boot loader on a Raspberry Pi 4 expects the file to be named kernel7l.img.
 
 Did you get it to build?
 
