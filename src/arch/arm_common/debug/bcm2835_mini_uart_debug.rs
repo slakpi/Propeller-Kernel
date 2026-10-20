@@ -21,8 +21,13 @@ const AUX_MU_LSR_REG: usize = 0x54;
 
 const AUX_MU_LSR_TX_IDLE: u32 = 1 << 6;
 
-/// The base physical address of the BCM2835 serial device registers.
+/// The base physical address of the BCM2835 serial device registers. The Pi 3
+/// uses 0x3f00_000 as the base physical address of the SoC while the Pi 4+ use
+/// 0xfe00_0000.
+#[cfg(feature = "bcm2835_mini_uart_debug")]
 const PHYSICAL_BASE_ADDRESS: usize = 0x3f21_5000;
+#[cfg(feature = "bcm2835_mini_uart_debug4")]
+const PHYSICAL_BASE_ADDRESS: usize = 0xfe21_5000;
 
 /// The size of the range to map in pages.
 const PHYSICAL_PAGES: usize = 1;

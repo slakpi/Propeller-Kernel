@@ -15,7 +15,13 @@ panic = "abort"
 cc = "1.0"
 
 [features]
+# Enable single-threaded unit tests.
 module_tests = []
+# Enable early serial debug output.
 serial_debug_output = []
+# Enable the BCM2835 mini UART debug driver for Raspberry Pi 3.
 bcm2835_mini_uart_debug = ["serial_debug_output"]
+# Enable the BCM2835 mini UART debug driver for Raspberry Pi 4+.
+bcm2835_mini_uart_debug4 = ["serial_debug_output"]
+# Enable the BCM2835 PL011 UART debug driver for Raspberry Pi 2.
 bcm2835_pl011_uart_debug = ["serial_debug_output"]
