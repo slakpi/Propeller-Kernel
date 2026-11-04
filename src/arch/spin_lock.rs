@@ -1,10 +1,15 @@
-//! Spin Lock Primitive
+//! Architecture-Dependent Spin Lock Utilities
 
-use crate::arch::sync::{spin_lock, spin_try_lock, spin_unlock};
 use core::cell::UnsafeCell;
 use core::convert::{AsMut, AsRef};
 use core::ops::{Deref, DerefMut, Drop};
 use core::ptr;
+
+unsafe extern "C" {
+  fn sync_spin_lock(lock_addr: usize);
+  fn sync_spin_try_lock(lock_addr: usize) -> u32;
+  fn sync_spin_unlock(lock_addr: usize);
+}
 
 /// Guard object for lock ownership. A SpinLock constructs a guard object when
 /// a thread acquires the lock. A thread releases the lock by dropping the guard
@@ -27,7 +32,9 @@ impl<'lock, T> SpinLockGuard<'lock, T> {
 impl<T> Drop for SpinLockGuard<'_, T> {
   /// Unlock on drop.
   fn drop(&mut self) {
-    spin_unlock(ptr::addr_of!(self.lock.lock_var) as usize);
+    unsafe {
+      sync_spin_unlock(ptr::addr_of!(self.lock.lock_var) as usize);
+    }
   }
 }
 
@@ -61,7 +68,7 @@ impl<T> DerefMut for SpinLockGuard<'_, T> {
 
 /// A spin lock protects a wrapped object. A guard object must be obtained
 /// using the lock method to access the protected object.
-pub struct SpinLock<T> {
+pub struct SpinLock<T = ()> {
   /// The protected object. UnsafeCell is used to allow interior mutability.
   obj: UnsafeCell<T>,
 
@@ -85,7 +92,9 @@ impl<T> SpinLock<T> {
   ///
   /// A guard object upon acquiring the lock.
   pub fn lock(&self) -> SpinLockGuard<'_, T> {
-    spin_lock(ptr::addr_of!(self.lock_var) as usize);
+    unsafe {
+      sync_spin_lock(ptr::addr_of!(self.lock_var) as usize);
+    }
     SpinLockGuard::new(self)
   }
 
@@ -96,7 +105,9 @@ impl<T> SpinLock<T> {
   /// A guard object upon acquiring the lock, or None if the lock is already
   /// acquired by another thread.
   pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
-    if !spin_try_lock(ptr::addr_of!(self.lock_var) as usize) {
+    let acquired = unsafe { sync_spin_try_lock(ptr::addr_of!(self.lock_var) as usize) };
+
+    if acquired != 0 {
       return None;
     }
 

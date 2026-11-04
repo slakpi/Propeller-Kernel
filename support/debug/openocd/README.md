@@ -29,6 +29,8 @@ Interface, target, and GDB scripts to debug hardware with OpenOCD. Currently, on
 
 Use `usbserial-FT7GUT2I2` for serial communication.
 
+Add `enable_jtag_gpio=1` to `config.txt`.
+
 ## Debugging
 
 Plugin in the Raspberry Pi and start OpenOCD using a command such as:

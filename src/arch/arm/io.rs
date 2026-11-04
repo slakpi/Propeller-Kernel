@@ -1,8 +1,7 @@
 //! ARM I/O Memory Management
 
-use crate::arch::cpu;
-use crate::mm;
-use crate::support::memory::{MappingStrategy, MemoryZone};
+use crate::arch::{self, cpu};
+use crate::support::memory::{MappingStrategy, MemoryZone, PageAllocator};
 use core::ptr;
 
 /// Initialize the I/O memory management module.
@@ -23,15 +22,13 @@ pub fn init() -> (usize, usize) {
 /// * `phys_addr` - The base physical address of the block.
 /// * `virt_addr` - The base virtual address of the block.
 /// * `pages` - The number of pages to map.
-///
-/// # Assumptions
-///
-/// Assumes the function has exclusive access to the page tables.
-pub fn map_io(phys_addr: usize, virt_addr: usize, pages: usize) {
-  let alloc = mm::get_zone_allocator(MemoryZone::LinearMemoryZone)
-    .as_ref()
-    .unwrap();
-
+/// * `allocator` - The allocator that will provide new table pages.
+pub fn map_io(
+  phys_addr: usize,
+  virt_addr: usize,
+  pages: usize,
+  allocator: &mut impl PageAllocator,
+) {
   super::mm::map_memory(
     super::init::get_kernel_virtual_base(),
     super::init::get_vm_split(),
@@ -40,7 +37,7 @@ pub fn map_io(phys_addr: usize, virt_addr: usize, pages: usize) {
     phys_addr,
     pages << super::init::get_page_shift(),
     true,
-    alloc.lock().as_mut(),
+    allocator,
     MappingStrategy::Granular,
   );
 
@@ -54,26 +51,19 @@ pub fn map_io(phys_addr: usize, virt_addr: usize, pages: usize) {
 ///
 /// * `virt_addr` - The base virtual address of the block.
 /// * `pages` - The number of pages to map.
-///
-/// # Description
-///
-/// The virtual address must be an address returned by `map_io()`.
+/// * `allocator` - The allocator that will provide new table pages.
 ///
 /// # Assumptions
 ///
-/// Assumes the function has exclusive access to the page tables.
-pub fn unmap_io(virt_addr: usize, pages: usize) {
-  let alloc = mm::get_zone_allocator(MemoryZone::LinearMemoryZone)
-    .as_ref()
-    .unwrap();
-
+/// Assumes the virtual address is an address returned by `map_io()`.
+pub fn unmap_io(virt_addr: usize, pages: usize, allocator: &mut impl PageAllocator) {
   super::mm::unmap_memory(
     super::init::get_kernel_virtual_base(),
     super::init::get_vm_split(),
     super::init::get_kernel_pages_start(),
     virt_addr,
     pages << super::init::get_page_shift(),
-    alloc.lock().as_mut(),
+    allocator,
   );
 
   cpu::flush_tlb_by_va_range(virt_addr, pages, 0);

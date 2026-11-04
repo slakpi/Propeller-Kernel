@@ -9,13 +9,13 @@ use core::{ptr, slice};
 const TABLE_SHIFT: usize = 9;
 const INDEX_MASK: usize = (1 << TABLE_SHIFT) - 1;
 
-const LEVEL_4_SHIFT: usize = arch::get_page_shift();
+const LEVEL_4_SHIFT: usize = super::init::get_page_shift();
 const LEVEL_3_SHIFT: usize = LEVEL_4_SHIFT + TABLE_SHIFT;
 const LEVEL_2_SHIFT: usize = LEVEL_3_SHIFT + TABLE_SHIFT;
 const LEVEL_1_SHIFT: usize = LEVEL_2_SHIFT + TABLE_SHIFT;
 
 /// Tables are a single page at all levels.
-const TABLE_SIZE: usize = arch::get_page_size();
+const TABLE_SIZE: usize = super::init::get_page_size();
 
 /// When using 4 KiB pages with a 48-bit output address, bits [47:12] are the
 /// physical address of a table or page pointer. Bits [47:30] are the physical
@@ -75,6 +75,8 @@ pub fn direct_map_memory(
   allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
+  let _guard = arch::lock_kernel_page_tables();
+
   fill_table(
     virtual_base,
     TableLevel::Level1,
@@ -115,6 +117,8 @@ pub fn map_memory(
   allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
+  let _guard = arch::lock_kernel_page_tables();
+
   fill_table(
     virtual_base,
     TableLevel::Level1,
@@ -149,14 +153,9 @@ pub fn unmap_memory(
   size: usize,
   allocator: &mut impl PageAllocator,
 ) {
-  clear_table(
-    virtual_base,
-    TableLevel::Level1,
-    pages_start,
-    virt,
-    size,
-    allocator,
-  )
+  let _guard = arch::lock_kernel_page_tables();
+
+  clear_table(virtual_base, TableLevel::Level1, pages_start, virt, size, allocator);
 }
 
 /// Wrapper for strategy-specific fill functions.
@@ -172,6 +171,11 @@ pub fn unmap_memory(
 /// * `device` - Whether this block or page maps to device memory.
 /// * `allocator` - The allocator that will provide new table pages.
 /// * `strategy` - The mapping strategy.
+///
+/// # Description
+///
+/// The fill_table functions are recursive, but bounded by the max depth of the
+/// page table hierarchy.
 fn fill_table(
   virtual_base: usize,
   table_level: TableLevel,
@@ -242,7 +246,7 @@ fn fill_table_compact(
   device: bool,
   allocator: &mut impl PageAllocator,
 ) {
-  let page_size = arch::get_page_size();
+  let page_size = super::init::get_page_size();
 
   assert!(bits::is_aligned(base, page_size));
   assert!(bits::is_aligned(virt, page_size));
@@ -318,7 +322,7 @@ fn fill_table_granular(
   device: bool,
   allocator: &mut impl PageAllocator,
 ) {
-  let page_size = arch::get_page_size();
+  let page_size = super::init::get_page_size();
 
   assert!(bits::is_aligned(virt, page_size));
   assert!(bits::is_aligned(base, page_size));
@@ -409,8 +413,7 @@ fn clear_table(
       }
       _ => {
         if is_pointer_entry(table_level, table[idx]) {
-          let next_addr =
-            get_phys_addr_from_descriptor(table_level, table[idx]).unwrap();
+          let next_addr = get_phys_addr_from_descriptor(table_level, table[idx]).unwrap();
 
           clear_table(
             virtual_base,
@@ -604,7 +607,7 @@ fn make_pointer_entry(table_level: TableLevel, phys_addr: usize) -> Option<usize
   match table_level {
     TableLevel::Level4 => None,
     _ => {
-      if !bits::is_aligned(phys_addr, arch::get_page_size()) {
+      if !bits::is_aligned(phys_addr, super::init::get_page_size()) {
         return None;
       }
 

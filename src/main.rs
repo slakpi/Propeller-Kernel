@@ -9,6 +9,7 @@
 mod arch;
 mod io;
 mod mm;
+mod smp;
 mod support;
 mod sync;
 mod task;
@@ -46,11 +47,8 @@ extern "C" fn pk_init(config: usize) {
   #[cfg(feature = "module_tests")]
   run_module_tests();
 
-  // Bring up any secondary cores.
-  let alloc = mm::get_zone_allocator(MemoryZone::LinearMemoryZone)
-    .as_ref()
-    .unwrap();
-  arch::init_smp(alloc);
+  // Bring up secondary cores.
+  smp::init();
 }
 
 /// Scheduler entry point.

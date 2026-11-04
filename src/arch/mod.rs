@@ -6,7 +6,7 @@ pub mod cpu;
 pub mod debug;
 pub mod interrupts;
 pub mod io;
-pub mod sync;
+pub mod spin_lock;
 pub mod task;
 
 // Architecture-specific modules. These are imported as private modules. The
@@ -21,10 +21,11 @@ mod aarch64;
 mod arm;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
 mod arm_common;
+mod buffered_allocator;
 
+use spin_lock::{SpinLock, SpinLockGuard};
 use crate::support::device_tree;
 use crate::support::memory::PageAllocator;
-use crate::sync::SpinLock;
 use core::ptr;
 
 // Reimport the architecture module with a consistent name.
@@ -32,6 +33,8 @@ use core::ptr;
 use aarch64 as intf;
 #[cfg(target_arch = "arm")]
 use arm as intf;
+
+static mut KERNEL_PAGE_LOCK: SpinLock = SpinLock::new(());
 
 /// Single-threaded architecture initialization.
 ///
@@ -48,8 +51,12 @@ pub fn init(config_addr: usize) {
 /// # Parameters
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
-pub fn init_smp(allocator: &SpinLock<impl PageAllocator>) {
-  intf::init::init_smp(allocator);
+///
+/// # Returns
+///
+/// The physical start address for secondary core boot.
+pub fn smp_init(allocator: &mut impl PageAllocator) -> usize {
+  intf::init::smp_init(allocator)
 }
 
 /// Get the size of a page.
@@ -130,6 +137,20 @@ pub fn get_page_database_virtual_base() -> usize {
 /// Get the size of the page database.
 pub fn get_page_database_size() -> usize {
   intf::init::get_page_database_size()
+}
+
+/// Lock the kernel's page tables.
+fn lock_kernel_page_tables() -> SpinLockGuard<'static, ()> {
+  unsafe {
+    ptr::addr_of!(KERNEL_PAGE_LOCK).as_ref().unwrap().lock()
+  }
+}
+
+/// Try to lock the kernel's page tables.
+fn try_lock_kernel_page_tables() -> Option<SpinLockGuard<'static, ()>> {
+  unsafe {
+    ptr::addr_of!(KERNEL_PAGE_LOCK).as_ref().unwrap().try_lock()
+  }
 }
 
 #[cfg(feature = "module_tests")]

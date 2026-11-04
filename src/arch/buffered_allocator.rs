@@ -1,4 +1,5 @@
-use crate::arch;
+//! Simple, Low-Level Buffered Page Allocator.
+
 use crate::support::bits;
 use crate::support::memory::PageAllocator;
 use core::ptr;
@@ -73,7 +74,7 @@ impl<const BUFFER_SIZE: usize> PageAllocator for BufferedPageAllocator<BUFFER_SI
   /// See `PageAllocator::alloc_and_zero`.
   fn alloc_and_zero(&mut self, pages: usize) -> Option<(usize, usize)> {
     let (addr, pages) = self.alloc(pages)?;
-    unsafe { ptr::write_bytes(addr as *mut u8, 0, pages * arch::get_page_size()) };
+    unsafe { ptr::write_bytes(addr as *mut u8, 0, pages * super::get_page_size()) };
     Some((addr, pages))
   }
 

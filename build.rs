@@ -1,5 +1,6 @@
 use cc;
 use std::env;
+use std::process::Command;
 
 /// Build script entry.
 fn main() {
@@ -21,6 +22,12 @@ fn main() {
   }
 
   cfg.compile("start");
+
+  // Get the current git commit hash and provide a compile time env variable to
+  // rustc.
+  let output = Command::new("git").args(&["rev-parse", "HEAD"]).output().unwrap();
+  let git_hash = String::from_utf8(output.stdout).unwrap();
+  println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 }
 
 /// Configure start library build for AArch64.

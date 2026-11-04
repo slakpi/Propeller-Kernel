@@ -96,6 +96,7 @@ pub fn direct_map_memory(
   strategy: MappingStrategy,
 ) {
   let virt = virtual_base + base;
+  let _guard = arch::lock_kernel_page_tables();
 
   fill_table(
     virtual_base,
@@ -144,6 +145,8 @@ pub fn map_memory(
   allocator: &mut impl PageAllocator,
   strategy: MappingStrategy,
 ) {
+  let _guard = arch::lock_kernel_page_tables();
+
   fill_table(
     virtual_base,
     get_first_table_level(virtual_base, vm_split, virt),
@@ -180,6 +183,8 @@ pub fn unmap_memory(
   size: usize,
   allocator: &mut impl PageAllocator,
 ) {
+  let _guard = arch::lock_kernel_page_tables();
+
   clear_table(
     virtual_base,
     get_first_table_level(virtual_base, vm_split, virt),
@@ -187,7 +192,7 @@ pub fn unmap_memory(
     virt,
     size,
     allocator,
-  )
+  );
 }
 
 /// Maps a thread-local table into the kernel's address space.
@@ -210,7 +215,6 @@ pub fn unmap_memory(
 ///
 /// # Assumptions
 ///
-/// * The function has exclusive access to the table entry.
 /// * The Level 1 and Level 2 page tables are in linear memory.
 pub fn map_thread_local_table(
   vm_split: usize,
@@ -222,20 +226,23 @@ pub fn map_thread_local_table(
   let start_level = get_first_table_level(virtual_base, vm_split, local_virt);
   let l2_addr: usize;
 
-  match start_level {
-    TableLevel::Level1 => {
-      let table = get_table(virtual_base + pages_start);
-      let idx = get_descriptor_index(local_virt, start_level);
-      l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]).unwrap();
+  {
+    let guard = arch::lock_kernel_page_tables();
+    match start_level {
+      TableLevel::Level1 => {
+        let table = get_table(virtual_base + pages_start);
+        let idx = get_descriptor_index(local_virt, start_level);
+        l2_addr = get_phys_addr_from_descriptor(start_level, table[idx], table[idx + 1]).unwrap();
+      }
+      _ => l2_addr = pages_start,
     }
-    _ => l2_addr = pages_start,
-  }
 
-  let table = get_table(virtual_base + l2_addr);
-  let idx = get_descriptor_index(local_virt, TableLevel::Level2);
-  let (desc, desc_high) = make_pointer_descriptor(TableLevel::Level2, table_addr).unwrap();
-  table[idx] = desc;
-  table[idx + 1] = desc_high;
+    let table = get_table(virtual_base + l2_addr);
+    let idx = get_descriptor_index(local_virt, TableLevel::Level2);
+    let (desc, desc_high) = make_pointer_descriptor(TableLevel::Level2, table_addr).unwrap();
+    table[idx] = desc;
+    table[idx + 1] = desc_high;
+  }
 
   cpu::flush_tlb_by_va(local_virt, 0);
   cpu::flush_bp_by_va(local_virt, 0);
@@ -355,6 +362,11 @@ fn get_first_table_level(virtual_base: usize, vm_split: usize, virt_addr: usize)
 /// * `device` - Whether this block or page maps to device memory.
 /// * `allocator` - The allocator that will provide new table pages.
 /// * `strategy` - The mapping strategy.
+///
+/// # Description
+///
+/// The fill_table functions are recursive, but bounded by the max depth of the
+/// page table hierarchy.
 fn fill_table(
   virtual_base: usize,
   table_level: TableLevel,

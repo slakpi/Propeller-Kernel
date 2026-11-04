@@ -1,5 +1,3 @@
-//! Synchronization Primitives
+//! Architecture-Independent Synchronization Utilities
 
-pub mod spin_lock;
-
-pub use spin_lock::*;
+pub use crate::arch::spin_lock::*;

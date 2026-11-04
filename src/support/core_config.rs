@@ -55,84 +55,6 @@ impl Core {
       release_addr: 0,
     }
   }
-
-  /// Release the core using its enable method.
-  ///
-  /// # Parameters
-  ///
-  /// * `start_addr` - The address at which the core should start.
-  /// * `enable_method` - The enable method to use.
-  ///
-  /// # Description
-  ///
-  /// If the enable method is None, the enable methods specified by the core
-  /// will be used.
-  fn release(&self, start_addr: usize, enable_method: Option<CoreEnableMethod>) {
-    let enable_method = if let Some(enable_method) = enable_method {
-      enable_method
-    } else if let Some(enable_method) = self.enable_method {
-      enable_method
-    } else {
-      panic!("Invalid enable method.");
-    };
-
-    match enable_method {
-      CoreEnableMethod::SpinTable => self.release_via_spin_table(start_addr),
-      CoreEnableMethod::Bcm2836 => self.release_via_bcm2836(start_addr),
-    }
-  }
-
-  /// Release the core using a spin table.
-  ///
-  /// # Parameters
-  ///
-  /// * `start_addr` - The address at which the core should start.
-  fn release_via_spin_table(&self, start_addr: usize) {
-    // The release address is in physical memory, but not guaranteed to be
-    // mapped linearly on all architectures.
-    let task = Task::get_current_task_mut();
-    let phys_page = bits::align_down(self.release_addr, arch::get_page_size());
-    let offset = self.release_addr - phys_page;
-    let virt_addr = (task.map_page(phys_page) + offset);
-
-    unsafe {
-      let ptr = virt_addr as *mut usize;
-      *ptr = start_addr;
-    }
-
-    cpu::flush_data_cache_by_va(virt_addr);
-    cpu::data_sync_barrier();
-    cpu::send_event();
-
-    task.unmap_page();
-  }
-
-  /// Release the core using the BCM2836 mailboxes.
-  ///
-  /// # Parameters
-  ///
-  /// * `start_addr` - The address at which the core should start.
-  fn release_via_bcm2836(&self, start_addr: usize) {
-    // TODO: Need to get the physical base address from the device tree.
-    const BCM2836_PHYS_ADDR: usize = 0x4000_0000;
-    const OFFSETS: [usize; 4] = [0x8c, 0x9c, 0xac, 0xbc];
-
-    // The BCM2836 only has four cores and the lower two bits of their
-    // identifiers need to be set to correspond to the mailbox numbers.
-    let index = self.id & 0x3;
-
-    let Some(virt_addr) = io::map_io(BCM2836_PHYS_ADDR, 1) else {
-      return;
-    };
-
-    unsafe {
-      let ptr = (virt_addr + OFFSETS[index]) as *mut usize;
-      *ptr = start_addr;
-    }
-
-    io::unmap_io(virt_addr);
-    cpu::send_event();
-  }
 }
 
 /// Convenience type for mapping from a hardware core ID to an core index.
@@ -202,22 +124,6 @@ impl CoreConfig {
     self.enable_method = enable_method;
   }
 
-  /// Release all secondary cores.
-  ///
-  /// # Parameters
-  ///
-  /// * `start_addr` - The address at which the core should start.
-  ///
-  /// # Description
-  ///
-  /// Uses the appropriate method to release all secondary cores to the provided
-  /// start address. The primary core is assumed to be core 0 and is skipped.
-  pub fn release(&self, start_addr: usize) {
-    for core in &self.cores[1..self.core_count] {
-      core.release(start_addr, self.enable_method);
-    }
-  }
-
   /// Reset the configuration.
   pub fn reset(&mut self) {
     self.id_map.clear();
@@ -233,6 +139,11 @@ impl CoreConfig {
   /// Get the list of cores.
   pub fn get_cores(&self) -> &[Core] {
     &self.cores[..self.core_count]
+  }
+  
+  /// Get the enable method.
+  pub fn get_enable_method(&self) -> Option<CoreEnableMethod> {
+    self.enable_method
   }
 
   /// Get the core index from a physical core identifier.

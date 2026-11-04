@@ -1,13 +1,11 @@
 use super::mm;
 use crate::arch::arm_common::{dtb_cpu, dtb_memory};
-use crate::arch::{cpu, debug};
+use crate::arch::{buffered_allocator, cpu, debug};
 use crate::debug_print;
-use crate::mm::buffered_allocator::BufferedPageAllocator;
 use crate::support::memory::{
   MappingStrategy, MemoryConfig, MemoryRange, MemoryRangeHandler, MemoryZone, PageAllocator,
 };
 use crate::support::{bits, device_tree, dtb};
-use crate::sync::SpinLock;
 use core::{ptr, slice};
 
 unsafe extern "C" {
@@ -69,6 +67,9 @@ struct KernelConfig {
 
 /// Re-initialization guard.
 static mut INITIALIZED: bool = false;
+
+/// SMP re-initialization guard.
+static mut SMP_INITIALIZED: bool = false;
 
 /// Kernel configuration provided by the start code.
 static mut KERNEL_CONFIG: KernelConfig = KernelConfig {
@@ -186,14 +187,23 @@ pub fn init(config_addr: usize) {
     KERNEL_CONFIG = *kconfig;
   }
 
-  // After initial setup, there should be a maximum of four page tables in use.
-  // That leaves 12, so a single 32-bit word is enough for the allocator's
-  // bitmap.
+  // Require 4 KiB pages.
+  assert_eq!(kconfig.page_size, PAGE_SIZE);
+
+  // Construct a buffered, linear allocator using the reserved kernel pages
+  // area. There will be no more than four bootstrap tables, so start four pages
+  // in. Calculate the number of 32-bit words needed for the allocator's bitmap,
+  // and assert that it is 1. If the bootstrap page area increases in size, this
+  // will need to be updated.
   let offset = 4 * kconfig.page_size;
-  let mut allocator = BufferedPageAllocator::<1>::new(
+  let rem_pages = (kconfig.kernel_pages_size - offset) / kconfig.page_size;
+  let words = (rem_pages + usize::BITS as usize - 1) / usize::BITS as usize;
+  assert_eq!(words, 1);
+
+  let mut allocator = buffered_allocator::BufferedPageAllocator::<1>::new(
     kconfig.kernel_pages_start + offset,
     kconfig.kernel_pages_start + kconfig.kernel_pages_size,
-    get_page_size(),
+    kconfig.page_size,
   );
 
   #[cfg(feature = "serial_debug_output")]
@@ -205,11 +215,9 @@ pub fn init(config_addr: usize) {
   );
 
   debug_print!("\n\n=== Propeller (ARM 32-bit) ===\n");
+  debug_print!("Build: {}\n", env!("GIT_HASH"));
   debug_print!("Booting on core {:x}...\n", cpu::get_id());
   debug_print!("arch init...\n");
-
-  // Require 4 KiB pages.
-  assert_eq!(kconfig.page_size, PAGE_SIZE);
 
   // Require a power-of-2 page count for the kernel stack size.
   assert!(bits::is_power_of_2(kconfig.kernel_stack_pages));
@@ -238,21 +246,19 @@ pub fn init(config_addr: usize) {
 /// # Parameters
 ///
 /// * `allocator` - An allocator suitable for allocating stacks and page tables.
-pub fn init_smp(allocator: &SpinLock<impl PageAllocator>) {
-  let core_config = get_device_tree().get_core_config();
-
-  // If the system only has a single core, it is already set up. There is no
-  // need to do anything else.
-  if core_config.get_core_count() < 2 {
-    return;
+///
+/// # Returns
+///
+/// The physical start address for secondary core boot.
+pub fn smp_init(allocator: &mut impl PageAllocator) -> usize {
+  unsafe {
+    assert!(!SMP_INITIALIZED);
+    SMP_INITIALIZED = true;
   }
 
-  debug_print!("--- SMP Initialization ---\n");
-  init_isr_stacks(allocator.lock().as_mut());
-
-  debug_print!("Releasing secondary cores...\n");
-  let start_addr = _secondary_start as *const () as usize - get_kernel_virtual_base();
-  core_config.release(start_addr);
+  init_isr_stacks(allocator);
+  
+  _secondary_start as *const () as usize - get_kernel_virtual_base()
 }
 
 /// Get the size of a page.
